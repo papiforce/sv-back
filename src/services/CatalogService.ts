@@ -61,11 +61,12 @@ class CatalogService {
   }
 
   static async verify(
-    name: string
+    name: string,
+    slug: string
   ): Promise<{ inLelManga: boolean; inSushiScan: boolean }> {
     const isInLelManga = await isMangaExistingInLelmanga(name);
 
-    const isInSushiScan = await isMangaExistingInSushiscan(name);
+    const isInSushiScan = await isMangaExistingInSushiscan(name, slug);
 
     return { inLelManga: isInLelManga, inSushiScan: isInSushiScan };
   }
@@ -73,11 +74,10 @@ class CatalogService {
   static async add(
     name: string,
     editorialLine: MangaType,
-    provider: ProviderType
+    provider: ProviderType,
+    slug?: string
   ): Promise<ICatalog> {
     const isExisting = await Catalog.findOne({ name });
-
-    console.log("PROVIDER => ", provider);
 
     if (isExisting) {
       if (isExisting.providers.includes(provider)) {
@@ -93,7 +93,11 @@ class CatalogService {
         const data =
           provider === "LELMANGA"
             ? ((await getDataFromLelmanga(name, editorialLine)) as ICatalog)
-            : ((await getDataFromSushiscan(name, editorialLine)) as ICatalog);
+            : ((await getDataFromSushiscan(
+                name,
+                editorialLine,
+                slug
+              )) as ICatalog);
 
         isExisting.providers.push(provider);
         isExisting.slugs.push(data.slugs[0]);
@@ -111,7 +115,7 @@ class CatalogService {
     const data =
       provider === "LELMANGA"
         ? ((await getDataFromLelmanga(name, editorialLine)) as ICatalog)
-        : ((await getDataFromSushiscan(name, editorialLine)) as ICatalog);
+        : ((await getDataFromSushiscan(name, editorialLine, slug)) as ICatalog);
 
     data.providers = [provider];
 

@@ -6,9 +6,12 @@ import { slugify } from "../utils";
 import { MangaType } from "../types";
 import { ICatalog } from "../models";
 
-export const isMangaExistingInSushiscan = async (name: string) => {
-  const slug = slugify(name);
-  const url = `https://sushiscan.fr/catalogue/${slug}/`;
+export const isMangaExistingInSushiscan = async (
+  name: string,
+  slug?: string
+) => {
+  const generatedSlug = slugify(slug ? slug : name);
+  const url = `https://sushiscan.fr/catalogue/${generatedSlug}/`;
 
   try {
     const response = await axios.get(url);
@@ -32,10 +35,12 @@ export const isMangaExistingInSushiscan = async (name: string) => {
 
 export const getDataFromSushiscan = async (
   name: string,
-  editorialLine: MangaType
+  editorialLine: MangaType,
+  slug?: string
 ) => {
-  const slug = slugify(name);
-  const url = `https://sushiscan.fr/catalogue/${slug}/`;
+  const generatedSlug = slugify(slug ? slug : name);
+  console.log(generatedSlug);
+  const url = `https://sushiscan.fr/catalogue/${generatedSlug}/`;
 
   const response = await axios.get(url);
 
@@ -115,13 +120,13 @@ export const getDataFromSushiscan = async (
       provider: "SUSHISCAN",
       firstChapter: {
         number: Number(firstChapterNumber) ? Number(firstChapterNumber) : 1,
-        url: `https://www.sushiscan.fr/${slug}-${
+        url: `https://www.sushiscan.fr/${generatedSlug}-${
           isChapter ? "chapitre" : "tome"
         }-${Number(firstChapterNumber) ? Number(firstChapterNumber) : 1}`,
       },
       lastChapter: {
         number: Number(lastChapterNumber),
-        url: `https://www.sushiscan.fr/${slug}-${
+        url: `https://www.sushiscan.fr/${generatedSlug}-${
           isChapter ? "chapitre" : "tome"
         }-${Number(lastChapterNumber)}`,
       },

@@ -52,7 +52,7 @@ class CatalogController {
 
   async verify(req: Request, res: Response): Promise<void> {
     try {
-      const { name } = req.body;
+      const { name, slug } = req.body;
 
       if (!name || name === "") {
         res.status(400).json({
@@ -63,7 +63,7 @@ class CatalogController {
         return;
       }
 
-      const isExisting = await CatalogService.verify(name);
+      const isExisting = await CatalogService.verify(name, slug);
 
       const formatResponse = (response: {
         inLelManga: boolean;
@@ -99,7 +99,7 @@ class CatalogController {
 
   async add(req: Request, res: Response): Promise<void> {
     try {
-      const { name, editorialLine, provider } = req.body;
+      const { name, slug, editorialLine, provider } = req.body;
 
       let errors: Record<string, string> = {};
 
@@ -131,7 +131,12 @@ class CatalogController {
         return;
       }
 
-      const manga = await CatalogService.add(name, editorialLine, provider);
+      const manga = await CatalogService.add(
+        name,
+        editorialLine,
+        provider,
+        slug
+      );
 
       res.status(201).json({
         success: true,
