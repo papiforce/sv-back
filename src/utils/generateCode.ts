@@ -6,8 +6,7 @@ function generateCode(): string {
   let code = "";
 
   for (let i = 0; i < 6; i++) {
-    const randomBytes = crypto.randomBytes(1);
-    const randomIndex = randomBytes[0] % charactersLength;
+    const randomIndex = crypto.randomInt(0, charactersLength);
     code += characters[randomIndex];
   }
 

@@ -1,18 +1,67 @@
 {
   "compilerOptions": {
+    // Module system - CommonJS pour Node.js
     "module": "commonjs",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "target": "es6",
+
+    // Target ES2022 pour de meilleures performances et fonctionnalités modernes
+    "target": "ES2022",
+
+    // Type checking strict pour la qualité du code
+    "strict": true,
     "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+
+    // Checks supplémentaires
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+
+    // Module resolution
     "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "allowJs": true,
+
+    // Emit
     "sourceMap": true,
     "outDir": "dist",
+    "removeComments": false,
+    "declaration": true,
+    "declarationMap": true,
+
+    // Interop et compatibilité
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    // Paths
     "baseUrl": ".",
     "paths": {
-      "*": ["node_modules/*", "src/types/*"]
+      "@/*": ["src/*"],
+      "@types/*": ["src/types/*"],
+      "@models/*": ["src/models/*"],
+      "@controllers/*": ["src/controllers/*"],
+      "@services/*": ["src/services/*"],
+      "@middlewares/*": ["src/middlewares/*"],
+      "@utils/*": ["src/utils/*"],
+      "@config/*": ["src/config/*"]
     },
-    "lib": ["ES2021.String"]
+
+    // Librairies modernes
+    "lib": ["ES2022", "ES2023.Array"]
   },
-  "include": ["./src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"],
+  "ts-node": {
+    "require": ["tsconfig-paths/register"],
+    "transpileOnly": true,
+    "files": true
+  }
 }
