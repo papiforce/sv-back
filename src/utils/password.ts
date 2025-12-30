@@ -1,25 +1,4 @@
-import bcrypt from "bcryptjs";
-
 export class PasswordUtils {
-  private static readonly SALT_ROUNDS = 12;
-
-  /**
-   * Hash un mot de passe
-   */
-  static async hash(password: string): Promise<string> {
-    return bcrypt.hash(password, this.SALT_ROUNDS);
-  }
-
-  /**
-   * Compare un mot de passe avec son hash
-   */
-  static async compare(
-    password: string,
-    hashedPassword: string
-  ): Promise<boolean> {
-    return bcrypt.compare(password, hashedPassword);
-  }
-
   /**
    * Valide la force du mot de passe
    */

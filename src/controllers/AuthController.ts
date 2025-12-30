@@ -285,7 +285,7 @@ export class AuthController {
     }
   }
 
-  /*
+  /**
    * POST /api/v1/auth/login
    * Connexion d'un utilisateur
    */
@@ -352,6 +352,70 @@ export class AuthController {
         success: false,
         message: "Erreur lors de la connexion",
         errors: { global: err.message },
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/auth/refresh
+   * Rafraîchir l'access token
+   */
+  static async refreshToken(req: Request, res: Response): Promise<void> {
+    try {
+      const currentToken = req.cookies.refreshToken;
+
+      if (!currentToken) {
+        res.status(401).json({
+          success: false,
+          message: "Refresh token manquant",
+        });
+        return;
+      }
+
+      const ipAddress =
+        (req.headers["x-forwarded-for"] as string) ||
+        req.socket.remoteAddress ||
+        "unknown";
+      const userAgent = req.headers["user-agent"] || "unknown";
+
+      const { accessToken, refreshToken } = await AuthService.refreshToken({
+        refreshToken: currentToken,
+        ipAddress,
+        userAgent,
+      });
+
+      // ✅ Envoyer le nouveau refresh token dans un cookie HTTP-only
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production", // HTTPS en prod
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+        path: "/",
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          accessToken: accessToken,
+        },
+        message: "Token rafraîchi avec succès",
+      });
+    } catch (error) {
+      const err = error as Error & { code?: string };
+
+      if (err.code === "INVALID_TOKEN") {
+        res.status(401).json({
+          success: false,
+          message: "Token invalide ou expiré",
+          errors: { global: err.message },
+        });
+        return;
+      }
+
+      console.error("Erreur lors du rafraîchissement du token:", error);
+      res.status(401).json({
+        success: false,
+        message: "Token invalide ou expiré",
       });
     }
   }

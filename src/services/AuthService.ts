@@ -75,6 +75,17 @@ export interface LoginResponse {
   };
 }
 
+export interface RefreshTokenDTO {
+  refreshToken: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export interface RefreshTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+}
+
 export class AuthService {
   /**
    * Inscription - PAS de tokens générés
@@ -139,13 +150,7 @@ export class AuthService {
         user._id as unknown as string
       );
 
-      user.emailVerificationToken = crypto
-        .createHash("sha256")
-        .update(token)
-        .digest("hex");
-      user.emailVerificationExpires = new Date(
-        Date.now() + 24 * 60 * 60 * 1000
-      ); // 24 heures
+      user.generateEmailVerificationToken(token);
 
       user.save();
 
@@ -189,7 +194,10 @@ export class AuthService {
         .select(
           "+emailVerificationToken +emailVerificationExpires +refreshTokens"
         )
-        .populate("referredBy");
+        .populate("referredBy", {
+          _id: 1,
+          username: 1,
+        });
 
       if (!user) {
         const error = new Error("Utilisateur non trouvé");
@@ -218,15 +226,8 @@ export class AuthService {
         throw error;
       }
 
-      user.accountStatus = AccountStatus.ACTIVE;
-      user.emailVerified = true;
-      user.emailVerifiedAt = new Date();
-
-      user.emailVerificationToken = undefined;
-      user.emailVerificationExpires = undefined;
-
-      user.loginCount += 1;
-      user.lastLoginAt = new Date();
+      await user.verifyEmail();
+      await user.incrementLoginCount();
 
       const jwtPayload: JWTPayload = {
         userId: user._id as unknown as string,
@@ -236,16 +237,7 @@ export class AuthService {
 
       const tokens = JWTUtils.generateTokens(jwtPayload);
 
-      // ✅ Sauvegarder le refresh token avec expiration
-      user.refreshTokens.push({
-        token: tokens.refreshToken,
-        createdAt: new Date(),
-        expiresAt: JWTUtils.getRefreshTokenExpiration(),
-        ipAddress,
-        userAgent,
-      });
-
-      await user.save();
+      await user.addRefreshToken(tokens.refreshToken, ipAddress, userAgent);
 
       return {
         user: {
@@ -301,13 +293,7 @@ export class AuthService {
         user._id as unknown as string
       );
 
-      user.emailVerificationToken = crypto
-        .createHash("sha256")
-        .update(token)
-        .digest("hex");
-      user.emailVerificationExpires = new Date(
-        Date.now() + 24 * 60 * 60 * 1000
-      ); // 24 heures
+      user.generateEmailVerificationToken(token);
 
       user.save();
 
@@ -357,10 +343,7 @@ export class AuthService {
         throw error;
       }
 
-      const isPasswordValid = await PasswordUtils.compare(
-        password,
-        user.password
-      );
+      const isPasswordValid = await user.comparePassword(password);
 
       if (!isPasswordValid) {
         const error = new Error("Email ou mot de passe incorrect");
@@ -398,17 +381,8 @@ export class AuthService {
 
       const tokens = JWTUtils.generateTokens(jwtPayload);
 
-      // ✅ Sauvegarder le refresh token avec expiration
-      user.refreshTokens.push({
-        token: tokens.refreshToken,
-        createdAt: new Date(),
-        expiresAt: JWTUtils.getRefreshTokenExpiration(),
-        ipAddress,
-        userAgent,
-      });
-
-      user.lastLoginAt = new Date();
-      await user.save();
+      await user.addRefreshToken(tokens.refreshToken, ipAddress, userAgent);
+      await user.incrementLoginCount();
 
       return {
         user: {
@@ -438,11 +412,12 @@ export class AuthService {
   /**
    * Rafraîchir l'access token
    */
-  static async refreshToken(refreshToken: string): Promise<{
-    accessToken: string;
-    refreshToken: string;
-  }> {
+  static async refreshToken(
+    data: RefreshTokenDTO
+  ): Promise<RefreshTokenResponse> {
     try {
+      const { refreshToken, ipAddress, userAgent } = data;
+
       const decoded = JWTUtils.verifyRefreshToken(refreshToken);
 
       // ✅ Vérifier que le token existe ET n'est pas expiré
@@ -450,7 +425,7 @@ export class AuthService {
         _id: decoded.userId,
         "refreshTokens.token": refreshToken,
         "refreshTokens.expiresAt": { $gt: new Date() }, // Pas expiré
-      });
+      }).select("+refreshTokens");
 
       if (!user) {
         const error = new Error("Token invalide ou expiré");
@@ -459,9 +434,7 @@ export class AuthService {
       }
 
       // ✅ Supprimer l'ancien refresh token
-      user.refreshTokens = user.refreshTokens.filter(
-        (rt: any) => rt.token !== refreshToken
-      );
+      await user.removeRefreshToken(refreshToken);
 
       const jwtPayload: JWTPayload = {
         userId: user._id as unknown as string,
@@ -472,12 +445,7 @@ export class AuthService {
       const tokens = JWTUtils.generateTokens(jwtPayload);
 
       // ✅ Sauvegarder le nouveau refresh token avec expiration
-      user.refreshTokens.push({
-        token: tokens.refreshToken,
-        createdAt: new Date(),
-        expiresAt: JWTUtils.getRefreshTokenExpiration(),
-      });
-      await user.save();
+      await user.addRefreshToken(tokens.refreshToken, ipAddress, userAgent);
 
       return tokens;
     } catch (error) {

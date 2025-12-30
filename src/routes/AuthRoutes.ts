@@ -46,4 +46,18 @@ router.post("/resend-verification", AuthController.resendVerificationEmail);
  */
 router.post("/login", AuthController.login);
 
+/**
+ * @route   POST /api/v1/auth/refresh
+ * @desc    Rafraîchir l'access token
+ * @access  Public (cookie requis)
+ */
+router.post("/refresh", AuthController.refreshToken);
+
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Déconnexion d'un utilisateur
+ * @access  Private
+ */
+// router.post("/logout", authMiddleware, AuthController.logout);
+
 export default router;

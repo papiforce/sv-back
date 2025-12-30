@@ -1,6 +1,7 @@
 import mongoose, { Document, Model, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { JWTUtils } from "@/utils/jwt";
 
 // ====================================
 // ENUMS
@@ -56,9 +57,13 @@ export interface IUser extends Document {
   // Méthodes
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateReferralCode(): string;
-  generateEmailVerificationToken(): string;
+  generateEmailVerificationToken(token: string): string;
   generatePasswordResetToken(): string;
-  addRefreshToken(token: string): Promise<void>;
+  addRefreshToken(
+    token: string,
+    ipAddress?: string,
+    userAgent?: string
+  ): Promise<void>;
   removeRefreshToken(token: string): Promise<void>;
   markAsDeleted(): Promise<void>;
   verifyEmail(): Promise<void>;
@@ -278,6 +283,8 @@ UserSchema.pre("save", async function (next) {
       this.referralCode = await (
         this.constructor as IUserModel
       ).generateUniqueReferralCode();
+    } else {
+      this.referralCode = undefined;
     }
   }
 
@@ -344,9 +351,9 @@ UserSchema.methods.generateReferralCode = function (): string {
 };
 
 // Générer un token de vérification d'email
-UserSchema.methods.generateEmailVerificationToken = function (): string {
-  const token = crypto.randomBytes(32).toString("hex");
-
+UserSchema.methods.generateEmailVerificationToken = function (
+  token: string
+): string {
   this.emailVerificationToken = crypto
     .createHash("sha256")
     .update(token)
@@ -373,14 +380,22 @@ UserSchema.methods.generatePasswordResetToken = function (): string {
 
 // Ajouter un refresh token
 UserSchema.methods.addRefreshToken = async function (
-  token: string
+  token: string,
+  ipAddress?: string,
+  userAgent?: string
 ): Promise<void> {
   // Limiter à 5 tokens (5 sessions max)
   if (this.refreshTokens.length >= 5) {
     this.refreshTokens.shift(); // Supprimer le plus ancien
   }
 
-  this.refreshTokens.push(token);
+  this.refreshTokens.push({
+    token,
+    createdAt: new Date(),
+    expiresAt: JWTUtils.getRefreshTokenExpiration(),
+    ipAddress,
+    userAgent,
+  });
   await this.save({ validateBeforeSave: false });
 };
 
@@ -388,7 +403,9 @@ UserSchema.methods.addRefreshToken = async function (
 UserSchema.methods.removeRefreshToken = async function (
   token: string
 ): Promise<void> {
-  this.refreshTokens = this.refreshTokens.filter((t: string) => t !== token);
+  this.refreshTokens = this.refreshTokens.filter(
+    (t: IRefreshToken) => t.token !== token
+  );
   await this.save({ validateBeforeSave: false });
 };
 
@@ -403,6 +420,7 @@ UserSchema.methods.markAsDeleted = async function (): Promise<void> {
 // Vérifier l'email
 UserSchema.methods.verifyEmail = async function (): Promise<void> {
   this.emailVerified = true;
+  this.emailVerifiedAt = new Date();
   this.emailVerificationToken = undefined;
   this.emailVerificationExpires = undefined;
   this.accountStatus = AccountStatus.ACTIVE;

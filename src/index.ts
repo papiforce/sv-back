@@ -4,6 +4,7 @@ import cors, { CorsOptions } from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import morgan from "morgan";
+import cookieParser from "cookie-parser";
 
 import {
   connectToDatabase,
@@ -97,8 +98,9 @@ if (NODE_ENV === "development") {
 }
 
 // Middlewares principaux
-app.use(cors(corsOptions));
+app.use(cookieParser());
 app.use(express.json({ limit: "10mb" })); // Limite la taille du body
+app.use(cors(corsOptions));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Middleware de gestion des erreurs (doit être en dernier)
