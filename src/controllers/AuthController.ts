@@ -419,4 +419,58 @@ export class AuthController {
       });
     }
   }
+
+  /**
+   * POST /api/v1/auth/logout
+   * Déconnecter l'utilisateur
+   */
+  static async logout(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Utilisateur non authentifié",
+          code: "NOT_AUTHENTICATED",
+        });
+        return;
+      }
+
+      const refreshToken = req.cookies.refreshToken;
+
+      if (refreshToken) {
+        await AuthService.logout(userId, refreshToken);
+      }
+
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+        path: "/",
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Déconnexion réussie",
+      });
+    } catch (error) {
+      const err = error as Error & { code?: string };
+
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+          errors: { global: err.message },
+        });
+        return;
+      }
+
+      console.error("Erreur lors de la déconnexion :", error);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la déconnexion",
+      });
+    }
+  }
 }

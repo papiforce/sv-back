@@ -1,10 +1,14 @@
 import { Router } from "express";
-import { AuthController } from "../controllers/AuthController";
+
+import { AuthController } from "@/controllers/AuthController";
+
+import { validateRequest } from "@/middlewares/validateRequest";
+import { authMiddleware } from "@/middlewares/AuthMiddleware";
+
 import {
   registerValidator,
   verifyEmailValidator,
 } from "@/validators/AuthValidator";
-import { validateRequest } from "../middlewares/validateRequest";
 
 const router = Router();
 
@@ -58,6 +62,6 @@ router.post("/refresh", AuthController.refreshToken);
  * @desc    Déconnexion d'un utilisateur
  * @access  Private
  */
-// router.post("/logout", authMiddleware, AuthController.logout);
+router.post("/logout", authMiddleware, AuthController.logout);
 
 export default router;

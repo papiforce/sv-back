@@ -19,7 +19,7 @@ export class JWTUtils {
    */
   static generateAccessToken(payload: JWTPayload): string {
     return jwt.sign(payload, JWT_SECRET, {
-      expiresIn: JWT_EXPIRES_IN as unknown as number,
+      expiresIn: 900,
     });
   }
 
@@ -28,7 +28,7 @@ export class JWTUtils {
    */
   static generateRefreshToken(userId: string): string {
     return jwt.sign({ userId }, JWT_REFRESH_SECRET, {
-      expiresIn: JWT_REFRESH_EXPIRES_IN as unknown as number,
+      expiresIn: 604800,
     });
   }
 

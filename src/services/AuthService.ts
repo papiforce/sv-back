@@ -454,7 +454,7 @@ export class AuthService {
         throw error;
       }
 
-      console.error("Erreur de rafraîchissement du token:", error);
+      console.error("Erreur de rafraîchissement du token :", error);
       throw new Error("Token invalide ou expiré");
     }
   }
@@ -466,20 +466,27 @@ export class AuthService {
     userId: string,
     refreshToken: string
   ): Promise<{ message: string }> {
-    const user = await UserModel.findById(userId);
+    try {
+      const user = await UserModel.findById(userId).select("+refreshTokens");
 
-    if (!user) {
-      const error = new Error("Utilisateur non trouvé");
-      (error as Error & { code?: string }).code = "USER_NOT_FOUND";
-      throw error;
+      if (!user) {
+        const error = new Error("Utilisateur non trouvé");
+        (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+        throw error;
+      }
+
+      await user.removeRefreshToken(refreshToken);
+
+      return { message: "Déconnexion réussie" };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error("Erreur lors de la déconnexion :", error);
+      throw new Error("Erreur lors de la déconnexion");
     }
-
-    user.refreshTokens = user.refreshTokens.filter(
-      (rt: any) => rt.token !== refreshToken
-    );
-    await user.save();
-
-    return { message: "Déconnexion réussie" };
   }
 
   /**
