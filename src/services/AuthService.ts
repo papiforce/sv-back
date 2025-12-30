@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-import UserModel, { AccountStatus, IUser } from "../models/UserModel";
+import UserModel, { IUser } from "../models/UserModel";
 
 import { PasswordUtils } from "../utils/password";
 import { JWTUtils, JWTPayload } from "../utils/jwt";
@@ -68,10 +68,31 @@ export interface LoginResponse {
     emailVerified: boolean;
     profilePicture?: string;
     accountStatus: string;
+    loginCount: number;
+    lastLoginAt?: Date;
   };
   tokens: {
     accessToken: string;
     refreshToken: string;
+  };
+}
+
+export interface GetUserProfileDTO {
+  userId: string;
+}
+
+export interface GetUserProfileResponse {
+  user: {
+    id: string;
+    email: string;
+    username: string;
+    roles: string[];
+    loginCount: number;
+    lastLoginAt?: Date;
+    emailVerified: boolean;
+    profilePicture?: string;
+    accountStatus: string;
+    referredBy?: any;
   };
 }
 
@@ -395,6 +416,8 @@ export class AuthService {
           profilePicture: user.profilePicture,
           accountStatus: user.accountStatus,
           referredBy: user.referredBy,
+          loginCount: user.loginCount || 0,
+          lastLoginAt: user.lastLoginAt,
         },
         tokens,
       };
@@ -406,6 +429,58 @@ export class AuthService {
 
       console.error("Erreur lors de la connexion :", error);
       throw new Error("Erreur lors de la connexion");
+    }
+  }
+
+  /**
+   * Récupérer le profil de l'utilisateur connecté
+   */
+  static async getUserProfile(
+    data: GetUserProfileDTO
+  ): Promise<GetUserProfileResponse> {
+    try {
+      const { userId } = data;
+
+      if (!userId) {
+        const error = new Error("ID utilisateur manquant");
+        (error as Error & { code?: string }).code = "MISSING_USER_ID";
+        throw error;
+      }
+
+      const user = await UserModel.findById(userId)
+        .select("-__v")
+        .populate("referredBy", {
+          _id: 1,
+          username: 1,
+        });
+
+      if (!user) {
+        const error = new Error("Utilisateur non trouvé");
+        (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+        throw error;
+      }
+
+      return {
+        user: {
+          id: user._id as unknown as string,
+          email: user.email,
+          username: user.username,
+          roles: user.roles,
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+          loginCount: user.loginCount || 0,
+          lastLoginAt: user.lastLoginAt,
+          emailVerified: user.emailVerified,
+        },
+      };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error("Erreur de l'obtention de l'utilisateur :", error);
+      throw new Error("Erreur de l'obtention de l'utilisateur");
     }
   }
 

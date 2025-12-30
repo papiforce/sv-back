@@ -38,8 +38,6 @@ function validateEnvironment(): void {
     "FRONTEND_URL",
     "JWT_SECRET",
     "JWT_REFRESH_SECRET",
-    "JWT_EXPIRES_IN",
-    "JWT_REFRESH_EXPIRES_IN",
     "ENABLE_CLEAN_TOKENS_JOB",
   ];
   const missingEnvVars = requiredEnvVars.filter(

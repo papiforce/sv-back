@@ -51,6 +51,13 @@ router.post("/resend-verification", AuthController.resendVerificationEmail);
 router.post("/login", AuthController.login);
 
 /**
+ * @route   GET /api/v1/auth/login
+ * @desc    Récupérer les informations de l'utilisateur
+ * @access  Private
+ */
+router.get("/profile", authMiddleware, AuthController.getProfile);
+
+/**
  * @route   POST /api/v1/auth/refresh
  * @desc    Rafraîchir l'access token
  * @access  Public (cookie requis)

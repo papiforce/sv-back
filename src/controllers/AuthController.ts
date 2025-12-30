@@ -357,6 +357,66 @@ export class AuthController {
   }
 
   /**
+   * GET /api/v1/auth/profile
+   * Récupérer le profil de l'utilisateur connecté
+   * @access Private (nécessite authMiddleware)
+   */
+  static async getProfile(req: Request, res: Response): Promise<void> {
+    try {
+      // ✅ 1. Récupérer l'userId depuis req.user (fourni par authMiddleware)
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Utilisateur non authentifié",
+          code: "NOT_AUTHENTICATED",
+        });
+        return;
+      }
+
+      // ✅ 2. Appeler le service
+      const result = await AuthService.getUserProfile({ userId });
+
+      // ✅ 3. Réponse de succès
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: "Profil récupéré avec succès",
+      });
+    } catch (error: any) {
+      const err = error as Error & { code?: string };
+
+      // ✅ Gestion des erreurs spécifiques
+      if (err.code === "MISSING_USER_ID") {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          code: error.code,
+        });
+        return;
+      }
+
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          message: error.message,
+          code: error.code,
+        });
+        return;
+      }
+
+      // ✅ Erreur générique
+      console.error("Erreur lors de la récupération du profil :", error);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la récupération du profil",
+        errors: { global: err.message },
+      });
+    }
+  }
+
+  /**
    * POST /api/v1/auth/refresh
    * Rafraîchir l'access token
    */
