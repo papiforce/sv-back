@@ -284,4 +284,75 @@ export class AuthController {
       });
     }
   }
+
+  /*
+   * POST /api/v1/auth/login
+   * Connexion d'un utilisateur
+   */
+  static async login(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, password } = req.body;
+
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = req.get("user-agent");
+
+      const { user, tokens } = await AuthService.login({
+        email,
+        password,
+        ipAddress,
+        userAgent,
+      });
+
+      res.cookie("refreshToken", tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          user,
+          accessToken: tokens.accessToken,
+        },
+      });
+    } catch (error) {
+      const err = error as Error & { code?: string };
+
+      if (err.code === "INVALID_CREDENTIALS") {
+        res.status(401).json({
+          success: false,
+          message: "Email ou mot de passe invalide",
+          errors: { global: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "EMAIL_NOT_VERIFIED") {
+        res.status(403).json({
+          success: false,
+          message: "Email non vérifié",
+          errors: { global: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "ACCOUNT_SUSPENDED" || err.code === "ACCOUNT_DELETED") {
+        res.status(403).json({
+          success: false,
+          message: "Compte suspendu",
+          errors: { global: err.message },
+        });
+        return;
+      }
+
+      console.error("Erreur lors de la connexion :", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la connexion",
+        errors: { global: err.message },
+      });
+    }
+  }
 }

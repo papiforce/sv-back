@@ -1,5 +1,7 @@
 import crypto from "crypto";
+
 import UserModel, { AccountStatus, IUser } from "../models/UserModel";
+
 import { PasswordUtils } from "../utils/password";
 import { JWTUtils, JWTPayload } from "../utils/jwt";
 
@@ -33,7 +35,9 @@ export interface VerifyEmailResponse {
     email: string;
     roles: string[];
     referralCode?: string;
+    referredBy?: any;
     profilePicture?: string;
+    accountStatus: string;
   };
   tokens: {
     accessToken: string;
@@ -46,6 +50,13 @@ export interface ResendVerificationEmailDTO {
   email: string;
 }
 
+export interface LoginDTO {
+  email: string;
+  password: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
 export interface LoginResponse {
   user: {
     id: string;
@@ -53,8 +64,10 @@ export interface LoginResponse {
     email: string;
     roles: string[];
     referralCode?: string;
+    referredBy?: any;
     emailVerified: boolean;
     profilePicture?: string;
+    accountStatus: string;
   };
   tokens: {
     accessToken: string;
@@ -113,14 +126,11 @@ export class AuthService {
         }
       }
 
-      // 5. Hash du mot de passe
-      const hashedPassword = await PasswordUtils.hash(password);
-
-      // 6. Créer l'utilisateur
+      // 5. Créer l'utilisateur
       const user = await UserModel.create({
         username,
         email: email.toLowerCase(),
-        password: hashedPassword,
+        password,
         roles: ["MEMBER"],
         referredBy: referrer?._id,
       });
@@ -175,9 +185,11 @@ export class AuthService {
         throw error;
       }
 
-      const user = await UserModel.findById(decoded.userId).select(
-        "+emailVerificationToken +emailVerificationExpires +refreshTokens"
-      );
+      const user = await UserModel.findById(decoded.userId)
+        .select(
+          "+emailVerificationToken +emailVerificationExpires +refreshTokens"
+        )
+        .populate("referredBy");
 
       if (!user) {
         const error = new Error("Utilisateur non trouvé");
@@ -243,6 +255,7 @@ export class AuthService {
           roles: user.roles,
           referralCode: user.referralCode,
           profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
         },
         tokens,
         message: "Email vérifié ! Vous êtes maintenant connecté.",
@@ -325,80 +338,101 @@ export class AuthService {
   /**
    * Connexion
    */
-  static async login(email: string, password: string): Promise<LoginResponse> {
-    const user = await UserModel.findOne({
-      email: email.toLowerCase(),
-    }).select("+password");
+  static async login(data: LoginDTO): Promise<LoginResponse> {
+    try {
+      const { email, password, ipAddress, userAgent } = data;
 
-    if (!user) {
-      const error = new Error("Email ou mot de passe incorrect");
-      (error as Error & { code?: string }).code = "INVALID_CREDENTIALS";
-      throw error;
-    }
+      const user = await UserModel.findOne({
+        email: email.toLowerCase(),
+      })
+        .select("+password +refreshTokens")
+        .populate("referredBy", {
+          _id: 1,
+          username: 1,
+        });
 
-    const isPasswordValid = await PasswordUtils.compare(
-      password,
-      user.password
-    );
+      if (!user) {
+        const error = new Error("Email ou mot de passe incorrect");
+        (error as Error & { code?: string }).code = "INVALID_CREDENTIALS";
+        throw error;
+      }
 
-    if (!isPasswordValid) {
-      const error = new Error("Email ou mot de passe incorrect");
-      (error as Error & { code?: string }).code = "INVALID_CREDENTIALS";
-      throw error;
-    }
-
-    if (!user.emailVerified) {
-      const error = new Error(
-        "Veuillez vérifier votre email avant de vous connecter"
+      const isPasswordValid = await PasswordUtils.compare(
+        password,
+        user.password
       );
-      (error as Error & { code?: string }).code = "EMAIL_NOT_VERIFIED";
-      throw error;
-    }
 
-    if (user.accountStatus === "SUSPENDED") {
-      const error = new Error(
-        "Votre compte est suspendu. Contactez le support."
-      );
-      (error as Error & { code?: string }).code = "ACCOUNT_SUSPENDED";
-      throw error;
-    }
+      if (!isPasswordValid) {
+        const error = new Error("Email ou mot de passe incorrect");
+        (error as Error & { code?: string }).code = "INVALID_CREDENTIALS";
+        throw error;
+      }
 
-    if (user.accountStatus === "DELETED") {
-      const error = new Error("Ce compte n'existe plus");
-      (error as Error & { code?: string }).code = "ACCOUNT_DELETED";
-      throw error;
-    }
+      if (!user.emailVerified) {
+        const error = new Error(
+          "Veuillez vérifier votre email avant de vous connecter"
+        );
+        (error as Error & { code?: string }).code = "EMAIL_NOT_VERIFIED";
+        throw error;
+      }
 
-    const jwtPayload: JWTPayload = {
-      userId: user._id as unknown as string,
-      email: user.email,
-      roles: user.roles,
-    };
+      if (user.accountStatus === "SUSPENDED") {
+        const error = new Error(
+          "Votre compte est suspendu. Contactez le support."
+        );
+        (error as Error & { code?: string }).code = "ACCOUNT_SUSPENDED";
+        throw error;
+      }
 
-    const tokens = JWTUtils.generateTokens(jwtPayload);
+      if (user.accountStatus === "DELETED") {
+        const error = new Error("Ce compte n'existe plus");
+        (error as Error & { code?: string }).code = "ACCOUNT_DELETED";
+        throw error;
+      }
 
-    // ✅ Sauvegarder le refresh token avec expiration
-    user.refreshTokens.push({
-      token: tokens.refreshToken,
-      createdAt: new Date(),
-      expiresAt: JWTUtils.getRefreshTokenExpiration(),
-    });
-
-    user.lastLoginAt = new Date();
-    await user.save();
-
-    return {
-      user: {
-        id: user._id as unknown as string,
-        username: user.username,
+      const jwtPayload: JWTPayload = {
+        userId: user._id as unknown as string,
         email: user.email,
         roles: user.roles,
-        referralCode: user.referralCode,
-        emailVerified: user.emailVerified,
-        profilePicture: user.profilePicture,
-      },
-      tokens,
-    };
+      };
+
+      const tokens = JWTUtils.generateTokens(jwtPayload);
+
+      // ✅ Sauvegarder le refresh token avec expiration
+      user.refreshTokens.push({
+        token: tokens.refreshToken,
+        createdAt: new Date(),
+        expiresAt: JWTUtils.getRefreshTokenExpiration(),
+        ipAddress,
+        userAgent,
+      });
+
+      user.lastLoginAt = new Date();
+      await user.save();
+
+      return {
+        user: {
+          id: user._id as unknown as string,
+          username: user.username,
+          email: user.email,
+          roles: user.roles,
+          referralCode: user.referralCode,
+          emailVerified: user.emailVerified,
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+          referredBy: user.referredBy,
+        },
+        tokens,
+      };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error("Erreur lors de la connexion :", error);
+      throw new Error("Erreur lors de la connexion");
+    }
   }
 
   /**

@@ -39,4 +39,11 @@ router.post(
  */
 router.post("/resend-verification", AuthController.resendVerificationEmail);
 
+/**
+ * @route   POST /api/v1/auth/login
+ * @desc    Connexion d'un utilisateur
+ * @access  Public
+ */
+router.post("/login", AuthController.login);
+
 export default router;
