@@ -1,4 +1,4 @@
-const waitlistEmail = () => `
+const waitlistEmail = (): string => `
   <!DOCTYPE html>
 <html lang="fr">
 <head>

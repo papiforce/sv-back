@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGO_URI = process.env.MONGO_URI;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
 // Configuration optimisée pour la production
@@ -19,15 +19,15 @@ const mongooseOptions: mongoose.ConnectOptions = {
  * Connecte l'application à MongoDB avec gestion d'erreurs avancée
  */
 export async function connectToDatabase(): Promise<void> {
-  if (!MONGODB_URI) {
+  if (!MONGO_URI) {
     console.error(
-      "❌ MONGODB_URI n'est pas défini dans les variables d'environnement"
+      "❌ MONGO_URI n'est pas défini dans les variables d'environnement"
     );
     process.exit(1);
   }
 
   try {
-    await mongoose.connect(MONGODB_URI, mongooseOptions);
+    await mongoose.connect(MONGO_URI, mongooseOptions);
 
     console.log(`✅ Connecté à MongoDB - Environnement: ${NODE_ENV}`);
     console.log(`📊 Base de données: ${mongoose.connection.name}`);

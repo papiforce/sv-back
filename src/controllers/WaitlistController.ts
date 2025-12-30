@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import WaitlistService from "@/services/WaitlistService";
 import EmailService from "@/services/EmailService";
+
 import waitlistEmail from "@/emails/waitlistEmail";
 
 class WaitlistController {
@@ -53,8 +54,6 @@ class WaitlistController {
             emailResult.error
           );
           // On continue quand même, l'inscription est valide
-        } else {
-          console.log(`✅ Email de confirmation envoyé à ${email}`);
         }
       } catch (emailError) {
         // Log de l'erreur mais on ne bloque pas l'inscription
@@ -99,7 +98,7 @@ class WaitlistController {
       res.status(500).json({
         success: false,
         message: "Une erreur est survenue lors de l'ajout à la liste d'attente",
-        errors: { global: "Erreur interne du serveur" },
+        errors: { global: err.message },
       });
     }
   }

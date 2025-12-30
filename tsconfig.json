@@ -51,7 +51,9 @@
       "@services/*": ["src/services/*"],
       "@middlewares/*": ["src/middlewares/*"],
       "@utils/*": ["src/utils/*"],
-      "@config/*": ["src/config/*"]
+      "@config/*": ["src/config/*"],
+      "@validators/*": ["src/validators/*"],
+      "@jobs/*": ["src/jobs/*"]
     },
 
     // Librairies modernes

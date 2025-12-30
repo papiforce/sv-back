@@ -11,6 +11,7 @@ import {
   isDatabaseConnected,
 } from "@/config/database";
 import routes from "@/routes";
+import { startJobs, stopJobs } from "@/jobs";
 
 // Charger les variables d'environnement en premier
 dotenv.config();
@@ -24,7 +25,22 @@ const AUTHORIZED_ORIGINS = process.env.AUTHORIZED_ORIGINS
 
 // Validation des variables d'environnement critiques
 function validateEnvironment(): void {
-  const requiredEnvVars = ["MONGODB_URI"];
+  const requiredEnvVars = [
+    "MONGO_URI",
+    "APP_NAME",
+    "APP_URL",
+    "SMTP_FROM",
+    "SMTP_HOST",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_PORT",
+    "FRONTEND_URL",
+    "JWT_SECRET",
+    "JWT_REFRESH_SECRET",
+    "JWT_EXPIRES_IN",
+    "JWT_REFRESH_EXPIRES_IN",
+    "ENABLE_CLEAN_TOKENS_JOB",
+  ];
   const missingEnvVars = requiredEnvVars.filter(
     (envVar) => !process.env[envVar]
   );
@@ -85,17 +101,6 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "10mb" })); // Limite la taille du body
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Routes de l'application
-routes(app, isDatabaseConnected(), NODE_ENV);
-
-// Gestion des routes non trouvées (404)
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({
-    error: "Route non trouvée",
-    message: "L'endpoint demandé n'existe pas",
-  });
-});
-
 // Middleware de gestion des erreurs (doit être en dernier)
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error("❌ Erreur non gérée:", err);
@@ -118,6 +123,12 @@ async function startServer(): Promise<void> {
 
     // Connexion à MongoDB
     await connectToDatabase();
+
+    // ✅ Démarrer tous les cron jobs
+    startJobs();
+
+    // Routes de l'application
+    routes(app, isDatabaseConnected(), NODE_ENV);
 
     // Démarrage du serveur HTTP
     const server = app.listen(PORT, () => {
@@ -155,7 +166,12 @@ async function startServer(): Promise<void> {
     };
 
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+    process.on("SIGINT", () => {
+      // Arrêter les cron jobs
+      stopJobs();
+
+      gracefulShutdown("SIGINT");
+    });
 
     // Gestion des erreurs non capturées
     process.on("uncaughtException", (error: Error) => {
