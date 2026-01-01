@@ -2,7 +2,6 @@ import crypto from "crypto";
 
 import UserModel, { IUser } from "../models/UserModel";
 
-import { PasswordUtils } from "../utils/password";
 import { JWTUtils, JWTPayload } from "../utils/jwt";
 
 export interface RegisterDTO {
@@ -48,6 +47,17 @@ export interface VerifyEmailResponse {
 
 export interface ResendVerificationEmailDTO {
   email: string;
+}
+
+export interface ForgotPasswordDTO {
+  email: string;
+}
+
+export interface ForgotPasswordResponse {
+  username?: string;
+  email?: string;
+  token?: string;
+  message: string;
 }
 
 export interface LoginDTO {
@@ -135,15 +145,7 @@ export class AuthService {
         throw error;
       }
 
-      // 3. Valider le mot de passe
-      const passwordValidation = PasswordUtils.validate(password);
-      if (!passwordValidation.isValid) {
-        const error = new Error(passwordValidation.errors.join(", "));
-        (error as Error & { code?: string }).code = "INVALID_PASSWORD";
-        throw error;
-      }
-
-      // 4. Vérifier le code de parrainage
+      // 3. Vérifier le code de parrainage
       let referrer: IUser | null = null;
       if (referredBy) {
         referrer = await UserModel.findOne({
@@ -158,7 +160,7 @@ export class AuthService {
         }
       }
 
-      // 5. Créer l'utilisateur
+      // 4. Créer l'utilisateur
       const user = await UserModel.create({
         username,
         email: email.toLowerCase(),
@@ -340,6 +342,172 @@ export class AuthService {
       );
       throw new Error("Erreur lors du renvoi de l'email de vérification");
     }
+  }
+
+  /**
+   * Demander une réinitialisation de mot de passe
+   */
+  static async forgotPassword(
+    data: ForgotPasswordDTO
+  ): Promise<ForgotPasswordResponse> {
+    try {
+      const { email } = data;
+
+      // ✅ 1. Validation de l'email
+      if (!email || !email.trim()) {
+        const error = new Error("Email requis");
+        (error as Error & { code?: string }).code = "EMAIL_REQUIRED";
+        throw error;
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        const error = new Error("Format d'email invalide");
+        (error as Error & { code?: string }).code = "INVALID_EMAIL_FORMAT";
+        throw error;
+      }
+
+      // ✅ 2. Rechercher l'utilisateur
+      const user = await UserModel.findOne({
+        email: email.toLowerCase(),
+      }).select("+passwordResetToken +passwordResetExpires");
+
+      // ⚠️ Important : Ne pas révéler si l'email existe ou non (sécurité)
+      // On retourne toujours un succès même si l'utilisateur n'existe pas
+      if (!user) {
+        return {
+          message:
+            "Si cet email existe, un lien de réinitialisation a été envoyé",
+        };
+      }
+
+      // ✅ 3. Vérifier que l'utilisateur a vérifié son email
+      if (!user.emailVerified) {
+        // On retourne quand même un succès pour ne pas révéler l'existence du compte
+        return {
+          message:
+            "Si cet email existe, un lien de réinitialisation a été envoyé",
+        };
+      }
+
+      // ✅ 4. Générer un token de réinitialisation (valide 1 heure)
+      const token = JWTUtils.generatePasswordResetToken(
+        user._id as unknown as string
+      );
+
+      user.generatePasswordResetToken(token);
+
+      await user.save();
+
+      return {
+        username: user.username,
+        email: user.email,
+        token,
+        message:
+          "Si cet email existe, un lien de réinitialisation a été envoyé",
+      };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error(
+        "Erreur lors du renvoi de l'email de vérification :",
+        error
+      );
+      throw new Error("Erreur lors du renvoi de l'email de vérification");
+    }
+  }
+
+  /**
+   * Réinitialiser le mot de passe avec un token
+   */
+  static async resetPassword(
+    token: string,
+    newPassword: string
+  ): Promise<{
+    message: string;
+    username: string;
+    email: string;
+  }> {
+    // ✅ 1. Validation du token
+    if (!token || !token.trim()) {
+      const error = new Error("Token de réinitialisation requis");
+      (error as Error & { code?: string }).code = "TOKEN_REQUIRED";
+      throw error;
+    }
+
+    const decoded = JWTUtils.verifyEmailToken(token);
+
+    console.log(decoded);
+
+    if (decoded.type !== "reset-password") {
+      const error = new Error("Token invalide");
+      (error as Error & { code?: string }).code = "INVALID_TOKEN";
+      throw error;
+    }
+
+    const user = await UserModel.findById(decoded.userId).select(
+      "+password +passwordResetToken +passwordResetExpires"
+    );
+
+    if (!user) {
+      const error = new Error("Utilisateur non trouvé");
+      (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+      throw error;
+    }
+
+    if (!user.emailVerified) {
+      const error = new Error(
+        "Email pas encore vérifié. Consultez votre boîte de réception."
+      );
+      (error as Error & { code?: string }).code = "EMAIL_NOT_VERIFIED";
+      throw error;
+    }
+
+    // ✅ 3. Vérifier que le nouveau mot de passe est différent de l'ancien
+    const isSamePassword = await user.comparePassword(newPassword);
+
+    if (isSamePassword) {
+      const error = new Error(
+        "Le nouveau mot de passe doit être différent de l'ancien"
+      );
+      (error as Error & { code?: string }).code = "SAME_PASSWORD";
+      throw error;
+    }
+
+    // ✅ 4. Hasher le token reçu pour le comparer avec celui en DB
+    const resetTokenHash = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
+
+    if (
+      user.passwordResetToken !== resetTokenHash ||
+      !user.passwordResetExpires ||
+      user.passwordResetExpires < new Date()
+    ) {
+      const error = new Error("Token invalide ou expiré");
+      (error as Error & { code?: string }).code = "INVALID_TOKEN";
+      throw error;
+    }
+
+    // ✅ 5. Mettre à jour le mot de passe et supprimer le token de reset
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+
+    // ✅ 6. Invalider tous les refresh tokens existants (forcer reconnexion)
+    user.refreshTokens = [];
+
+    await user.save();
+
+    return {
+      username: user.username,
+      email: user.email,
+      message: "Mot de passe réinitialisé avec succès",
+    };
   }
 
   /**
@@ -579,4 +747,8 @@ export class AuthService {
       }
     );
   }
+
+  /**
+   * ✅ Nettoyer les tokens expirés : email & password (à exécuter via un cron job)
+   */
 }

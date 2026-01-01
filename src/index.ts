@@ -27,17 +27,28 @@ const AUTHORIZED_ORIGINS = process.env.AUTHORIZED_ORIGINS
 // Validation des variables d'environnement critiques
 function validateEnvironment(): void {
   const requiredEnvVars = [
-    "MONGO_URI",
+    "NODE_ENV",
     "APP_NAME",
     "APP_URL",
-    "SMTP_FROM",
+    "AUTHORIZED_ORIGINS",
+    "FRONTEND_URL",
+
+    "MONGO_URI",
+    "MONGO_DB_NAME",
+    "MONGO_ROOT_USER",
+    "MONGO_ROOT_PASSWORD",
+
     "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_SECURE",
+    "SMTP_FROM",
     "SMTP_USER",
     "SMTP_PASSWORD",
-    "SMTP_PORT",
-    "FRONTEND_URL",
+    "SMTP_FROM",
+
     "JWT_SECRET",
     "JWT_REFRESH_SECRET",
+
     "ENABLE_CLEAN_TOKENS_JOB",
   ];
   const missingEnvVars = requiredEnvVars.filter(

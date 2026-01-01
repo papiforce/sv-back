@@ -58,7 +58,7 @@ export interface IUser extends Document {
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateReferralCode(): string;
   generateEmailVerificationToken(token: string): string;
-  generatePasswordResetToken(): string;
+  generatePasswordResetToken(token: string): string;
   addRefreshToken(
     token: string,
     ipAddress?: string,
@@ -365,9 +365,9 @@ UserSchema.methods.generateEmailVerificationToken = function (
 };
 
 // Générer un token de réinitialisation de mot de passe
-UserSchema.methods.generatePasswordResetToken = function (): string {
-  const token = crypto.randomBytes(32).toString("hex");
-
+UserSchema.methods.generatePasswordResetToken = function (
+  token: string
+): string {
   this.passwordResetToken = crypto
     .createHash("sha256")
     .update(token)

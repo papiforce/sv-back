@@ -3,7 +3,12 @@ import { Request, Response } from "express";
 import { AuthService } from "@/services/AuthService";
 import EmailService from "@/services/EmailService";
 
-import { welcomeEmail, verificationEmail } from "@/emails";
+import {
+  welcomeEmail,
+  verificationEmail,
+  forgotPasswordEmail,
+  resetPasswordEmail,
+} from "@/emails";
 
 export class AuthController {
   /**
@@ -72,15 +77,6 @@ export class AuthController {
           success: false,
           message: "Le nom d'utilisateur est déjà utilisé",
           errors: { username: err.message },
-        });
-        return;
-      }
-
-      if (err.code === "INVALID_PASSWORD") {
-        res.status(400).json({
-          success: false,
-          message: "Mot de passe invalide",
-          errors: { password: err.message },
         });
         return;
       }
@@ -281,6 +277,192 @@ export class AuthController {
         success: false,
         message: "Erreur lors du renvoi de l'email de vérification",
         errors: { global: (error as Error).message },
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/auth/forgot-password
+   * Renvoyer l'email de vérification
+   */
+  static async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = req.body;
+
+      // ✅ 1. Appeler le service
+      const {
+        username,
+        email: userEmail,
+        token,
+        message,
+      } = await AuthService.forgotPassword({ email });
+
+      if (username && userEmail) {
+        try {
+          const emailContent = forgotPasswordEmail(
+            username,
+            `${process.env.FRONTEND_URL}/reset-password?token=${token}`
+          );
+
+          const emailResult = await EmailService.sendEmail({
+            to: email,
+            subject: "🔑 Créer un nouveau mot de passe",
+            html: emailContent,
+          });
+
+          if (!emailResult.success) {
+            console.error(
+              `⚠️ Email de récupération de mot de passe non envoyé pour ${email}:`,
+              emailResult.error
+            );
+            // On continue quand même, l'inscription est valide
+          }
+        } catch (emailError) {
+          // Log de l'erreur mais on ne bloque pas l'inscription
+          console.error(
+            `❌ Erreur lors de l'envoi de l'email à ${email}:`,
+            emailError
+          );
+        }
+      }
+
+      // ✅ 3. Réponse de succès
+      res.status(200).json({
+        success: true,
+        message: message,
+      });
+    } catch (error: any) {
+      const err = error as Error & { code?: string };
+
+      // ✅ Gestion des erreurs spécifiques
+      if (
+        err.code === "EMAIL_REQUIRED" ||
+        err.code === "INVALID_EMAIL_FORMAT"
+      ) {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          code: error.code,
+        });
+        return;
+      }
+
+      if (err.code === "EMAIL_SEND_ERROR") {
+        res.status(500).json({
+          success: false,
+          message:
+            "Erreur lors de l'envoi de l'email. Veuillez réessayer plus tard.",
+          code: error.code,
+        });
+        return;
+      }
+
+      // ✅ Erreur générique
+      console.error("Erreur lors de la demande de réinitialisation:", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la demande de réinitialisation",
+      });
+    }
+  }
+
+  /**
+   * POST /api/auth/reset-password
+   * Réinitialiser le mot de passe avec un token
+   * @access Public
+   */
+  static async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { token, newPassword } = req.body;
+
+      // ✅ 1. Validation basique
+      if (!token) {
+        res.status(400).json({
+          success: false,
+          message: "Token de réinitialisation requis",
+          code: "TOKEN_REQUIRED",
+        });
+        return;
+      }
+
+      if (!newPassword) {
+        res.status(400).json({
+          success: false,
+          message: "Nouveau mot de passe requis",
+          code: "PASSWORD_REQUIRED",
+        });
+        return;
+      }
+
+      // ✅ 2. Appeler le service
+      const { username, email, message } = await AuthService.resetPassword(
+        token,
+        newPassword
+      );
+
+      try {
+        const emailContent = resetPasswordEmail(username);
+
+        const emailResult = await EmailService.sendEmail({
+          to: email,
+          subject: "🔑 Votre mot de passe a été modifié",
+          html: emailContent,
+        });
+
+        if (!emailResult.success) {
+          console.error(
+            `⚠️ Email de vérification non envoyé pour ${email}:`,
+            emailResult.error
+          );
+          // On continue quand même, l'inscription est valide
+        }
+      } catch (emailError) {
+        // Log de l'erreur mais on ne bloque pas l'inscription
+        console.error(
+          `❌ Erreur lors de l'envoi de l'email à ${email}:`,
+          emailError
+        );
+      }
+
+      // ✅ 3. Réponse de succès
+      res.status(200).json({
+        success: true,
+        message,
+      });
+    } catch (error: any) {
+      const err = error as Error & { code?: string };
+
+      // ✅ Gestion des erreurs spécifiques
+      if (
+        err.code === "TOKEN_REQUIRED" ||
+        err.code === "INVALID_PASSWORD" ||
+        err.code === "SAME_PASSWORD" ||
+        err.code === "INVALID_OR_EXPIRED_TOKEN" ||
+        err.code === "EMAIL_NOT_VERIFIED" ||
+        err.code === "INVALID_TOKEN"
+      ) {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      // ✅ Erreur générique
+      console.error("Erreur lors de la réinitialisation du mot de passe:", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la réinitialisation du mot de passe",
       });
     }
   }

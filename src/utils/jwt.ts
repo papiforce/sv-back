@@ -75,8 +75,24 @@ export class JWTUtils {
    */
   static generateEmailVerificationToken(userId: string): string {
     return jwt.sign({ userId, type: "email-verification" }, JWT_SECRET, {
-      expiresIn: "24h",
+      expiresIn: 86400, // 24h
     });
+  }
+
+  /**
+   * Génère un token de récupération de mot de passe
+   */
+  static generatePasswordResetToken(userId: string): string {
+    return jwt.sign(
+      {
+        userId,
+        type: "reset-password",
+      },
+      JWT_SECRET,
+      {
+        expiresIn: 3600, // 1 heure en secondes
+      }
+    );
   }
 
   /**

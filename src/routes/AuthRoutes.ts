@@ -8,6 +8,7 @@ import { authMiddleware } from "@/middlewares/AuthMiddleware";
 import {
   registerValidator,
   verifyEmailValidator,
+  resetPasswordValidator,
 } from "@/validators/AuthValidator";
 
 const router = Router();
@@ -42,6 +43,24 @@ router.post(
  * @access  Public
  */
 router.post("/resend-verification", AuthController.resendVerificationEmail);
+
+/**
+ * @route   POST /api/v1/auth/forgot-password
+ * @desc    Demander une réinitialisation de mot de passe
+ * @access  Public
+ */
+router.post("/forgot-password", AuthController.forgotPassword);
+
+/**
+ * @route   POST /api/v1/auth/reset-password/:token
+ * @desc    Réinitialiser le mot de passe
+ * @access  Public
+ */
+router.post(
+  "/reset-password",
+  resetPasswordValidator,
+  AuthController.resetPassword
+);
 
 /**
  * @route   POST /api/v1/auth/login
