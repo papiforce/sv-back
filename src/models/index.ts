@@ -1,5 +1,9 @@
-import Catalog, { ICatalog } from "./Catalog";
-import User, { IUser } from "./User";
-import Waitlist, { IWaitlist } from "./Waitlist";
+import UserModel from "./UserModel";
+import WaitlistModel from "./WaitlistModel";
 
-export { Catalog, ICatalog, User, IUser, Waitlist, IWaitlist };
+export { UserModel, WaitlistModel };
+
+export default {
+  User: UserModel,
+  Waitlist: WaitlistModel,
+};

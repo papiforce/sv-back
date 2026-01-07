@@ -1,447 +1,754 @@
-import { User, IUser, Waitlist } from "../models";
+import crypto from "crypto";
 
-import EmailService from "./EmailService";
+import UserModel, { IUser } from "../models/UserModel";
 
-import { verificationEmail, welcomeEmail } from "../emails";
-import { verifyEmailToken } from "../utils";
+import { JWTUtils, JWTPayload } from "../utils/jwt";
 
-import {
-  generateAccessToken,
-  generateEmailVerificationToken,
-  generateRefreshToken,
-  generateDiscordRefreshToken,
-  verifyRefreshToken,
-} from "../utils";
+export interface RegisterDTO {
+  username: string;
+  email: string;
+  password: string;
+  referredBy?: string;
+}
 
-const { FRONTEND_URL } = process.env;
+export interface RegisterResponse {
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    emailVerificationToken?: string;
+  };
+  message: string;
+}
 
-class AuthService {
-  static async signUp(data: Partial<IUser>): Promise<IUser> {
-    const existingEmail = await User.findOne({ email: data.email });
+export interface VerifyEmailDTO {
+  token: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
 
-    const existingUsername = await User.findOne({ username: data.username });
+export interface VerifyEmailResponse {
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    roles: string[];
+    referralCode?: string;
+    referredBy?: any;
+    profilePicture?: string;
+    accountStatus: string;
+  };
+  tokens: {
+    accessToken: string;
+    refreshToken: string;
+  };
+  message: string;
+}
 
-    if (existingEmail && existingUsername) {
-      const error = new Error(
-        "Cet email et ce nom d'utilisateur sont déjà utilisés."
-      ) as Error & {
-        code?: string;
-      };
+export interface ResendVerificationEmailDTO {
+  email: string;
+}
 
-      error.code = "EMAIL_AND_USERNAME_ALREADY_USED";
-      throw error;
-    }
+export interface ForgotPasswordDTO {
+  email: string;
+}
 
-    if (existingEmail) {
-      if (existingEmail.authProvider === "DISCORD") {
-        const error = new Error(
-          "Cet email est déjà utilisé via Discord. Veuillez vous connecter avec Discord."
-        ) as Error & {
-          code?: string;
-        };
+export interface ForgotPasswordResponse {
+  username?: string;
+  email?: string;
+  token?: string;
+  message: string;
+}
 
-        error.code = "EMAIL_ALREADY_USED_BY_DISCORD";
+export interface LoginDTO {
+  email: string;
+  password: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export interface LoginResponse {
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    roles: string[];
+    referralCode?: string;
+    referredBy?: any;
+    emailVerified: boolean;
+    profilePicture?: string;
+    accountStatus: string;
+    loginCount: number;
+    lastLoginAt?: Date;
+  };
+  tokens: {
+    accessToken: string;
+    refreshToken: string;
+  };
+}
+
+export interface GetUserProfileDTO {
+  userId: string;
+}
+
+export interface GetUserProfileResponse {
+  user: {
+    id: string;
+    email: string;
+    username: string;
+    roles: string[];
+    loginCount: number;
+    lastLoginAt?: Date;
+    emailVerified: boolean;
+    profilePicture?: string;
+    accountStatus: string;
+    referredBy?: any;
+  };
+}
+
+export interface RefreshTokenDTO {
+  refreshToken: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export interface RefreshTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export class AuthService {
+  /**
+   * Inscription - PAS de tokens générés
+   */
+  static async register(data: RegisterDTO): Promise<RegisterResponse> {
+    try {
+      const { username, email, password, referredBy } = data;
+
+      // 1. Vérifier si l'email existe déjà
+      const existingEmail = await UserModel.findOne({
+        email: email.toLowerCase(),
+      });
+      if (existingEmail) {
+        const error = new Error("Cette adresse email est déjà utilisée");
+        (error as Error & { code?: string }).code = "EMAIL_IN_USE";
         throw error;
       }
 
-      const error = new Error("Cet email est déjà utilisé.") as Error & {
-        code?: string;
-      };
+      // 2. Vérifier si le username existe déjà
+      const existingUsername = await UserModel.findOne({
+        username: { $regex: new RegExp(`^${username}$`, "i") },
+      });
+      if (existingUsername) {
+        const error = new Error("Ce nom d'utilisateur est déjà pris");
+        (error as Error & { code?: string }).code = "USERNAME_IN_USE";
+        throw error;
+      }
 
-      error.code = "EMAIL_ALREADY_USED";
-      throw error;
-    }
+      // 3. Vérifier le code de parrainage
+      let referrer: IUser | null = null;
+      if (referredBy) {
+        referrer = await UserModel.findOne({
+          referralCode: referredBy.toUpperCase(),
+          accountStatus: "ACTIVE",
+        });
 
-    if (existingUsername) {
-      const error = new Error(
-        "Ce nom d'utilisateur est déjà utilisé."
-      ) as Error & {
-        code?: string;
-      };
+        if (!referrer) {
+          const error = new Error("Code de parrainage invalide");
+          (error as Error & { code?: string }).code = "INVALID_REFERRAL_CODE";
+          throw error;
+        }
+      }
 
-      error.code = "USERNAME_ALREADY_USED";
-      throw error;
-    }
-
-    let user: IUser = new User({
-      username: data.username,
-      email: data.email.toLowerCase(),
-      password: data.password,
-      roles: ["MEMBER"],
-      isEmailVerified: false,
-      profilePicture: null,
-      description: null,
-      refreshTokens: [],
-      isDeleted: false,
-    });
-
-    const userInWailist = await Waitlist.findOneAndUpdate(
-      { email: user.email },
-      { userId: user._id }
-    );
-
-    if (userInWailist) user.referalCode = userInWailist.code;
-
-    if (data.referalCode && !userInWailist) {
-      const referalCodeInWaitlist = await Waitlist.findOne({
-        code: data.referalCode,
+      // 4. Créer l'utilisateur
+      const user = await UserModel.create({
+        username,
+        email: email.toLowerCase(),
+        password,
+        roles: ["MEMBER"],
+        referredBy: referrer?._id,
       });
 
-      if (referalCodeInWaitlist)
-        user.sponsoredBy = referalCodeInWaitlist.userId;
-    }
+      const token = JWTUtils.generateEmailVerificationToken(
+        user._id as unknown as string
+      );
 
-    await user.save();
+      user.generateEmailVerificationToken(token);
 
-    const emailVerificationToken = generateEmailVerificationToken(user);
+      user.save();
 
-    await EmailService.sendEmail(
-      user.email,
-      "Vérifiez votre adresse email",
-      verificationEmail(
-        user.username,
-        `${FRONTEND_URL}/verify-email?token=${emailVerificationToken}`
-      )
-    );
-
-    return user;
-  }
-
-  static async verifyEmail(token: string): Promise<boolean> {
-    const decoded = verifyEmailToken(token);
-
-    if (typeof decoded === "string" || decoded.type !== "EMAIL_VERIFICATION") {
-      const error = new Error("Token invalide") as Error & {
-        code?: string;
+      return {
+        user: {
+          id: user._id as unknown as string,
+          username: user.username,
+          email: user.email,
+          emailVerificationToken: token,
+        },
+        message:
+          "Inscription réussie ! Vérifiez votre email pour activer votre compte.",
       };
-
-      error.code = "INVALID_TOKEN";
-      throw error;
-    }
-
-    const user = await User.findById(decoded.sub);
-
-    if (!user) {
-      const error = new Error("Utilisateur introuvable") as Error & {
-        code?: string;
-      };
-
-      error.code = "USER_NOT_FOUND";
-      throw error;
-    }
-
-    if (user.isEmailVerified) {
-      const error = new Error("Email déjà vérifié") as Error & {
-        code?: string;
-      };
-
-      error.code = "EMAIL_ALREADY_VERIFIED";
-      throw error;
-    }
-
-    if (user.email !== decoded.email) {
-      const error = new Error("Email non correspondant") as Error & {
-        code?: string;
-      };
-
-      error.code = "EMAIL_MISMATCH";
-      throw error;
-    }
-
-    user.isEmailVerified = true;
-    await user.save();
-
-    await EmailService.sendEmail(
-      user.email,
-      "Bienvenue sur Scanverse - Votre compte a été activé",
-      welcomeEmail(user.username, `${process.env.FRONTEND_URL}/connexion`)
-    );
-
-    return true;
-  }
-
-  static async resendVerification(email: string): Promise<boolean> {
-    const user = await User.findOne({ email: email.toLowerCase() });
-
-    if (!user) {
-      const error = new Error("Utilisateur introuvable") as Error & {
-        code?: string;
-      };
-
-      error.code = "USER_NOT_FOUND";
-      throw error;
-    }
-
-    if (user.isEmailVerified) {
-      const error = new Error("Email déjà vérifié") as Error & {
-        code?: string;
-      };
-
-      error.code = "EMAIL_ALREADY_VERIFIED";
-      throw error;
-    }
-
-    const emailVerificationToken = generateEmailVerificationToken(user);
-
-    await EmailService.sendEmail(
-      user.email,
-      "Vérifiez votre adresse email",
-      verificationEmail(
-        user.username,
-        `${FRONTEND_URL}/verify-email?token=${emailVerificationToken}`
-      )
-    );
-
-    return true;
-  }
-
-  static async signIn(
-    email: string,
-    password: string,
-    deviceInfo: string
-  ): Promise<IUser & { accessToken: string }> {
-    const user = await User.findOne({ email }).select("+password").exec();
-
-    if (user.isDeleted) {
-      const error = new Error("Ce compte a été supprimé.") as Error & {
-        code?: string;
-      };
-
-      error.code = "ACCOUNT_DELETED";
-      throw error;
-    }
-
-    if (!user) {
-      const error = new Error("Identifiants invalides.") as Error & {
-        code?: string;
-      };
-
-      error.code = "INVALID_CREDENTIALS";
-      throw error;
-    }
-
-    const isPasswordValid = await user.matchPassword(password);
-
-    if (!isPasswordValid) {
-      const error = new Error("Identifiants invalides.") as Error & {
-        code?: string;
-      };
-
-      error.code = "INVALID_CREDENTIALS";
-      throw error;
-    }
-
-    if (!user.isEmailVerified) {
-      const error = new Error(
-        "Veuillez vérifier votre adresse email avant de vous connecter."
-      ) as Error & {
-        code?: string;
-      };
-
-      error.code = "EMAIL_NOT_VERIFIED";
-      throw error;
-    }
-
-    const userId = user._id.toString();
-
-    const accessToken = generateAccessToken(userId, user.email);
-    const refreshToken = generateRefreshToken(userId);
-
-    user.refreshTokens.push({
-      token: refreshToken,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      deviceInfo,
-    });
-
-    if (user.refreshTokens.length > 2) {
-      user.refreshTokens = user.refreshTokens
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(0, 2);
-    }
-
-    await user.save();
-
-    return { ...user.toObject(), accessToken } as unknown as IUser & {
-      accessToken: string;
-    };
-  }
-
-  static async discordSignIn(
-    user: Partial<IUser>,
-    deviceInfo: string
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    const userId = user._id as string;
-
-    const accessToken = generateAccessToken(userId, user.email);
-
-    const refreshToken = generateDiscordRefreshToken(userId);
-
-    user.password = null;
-
-    user.refreshTokens.push({
-      token: refreshToken,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      deviceInfo,
-    });
-
-    if (user.refreshTokens.length > 2) {
-      user.refreshTokens = user.refreshTokens
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(0, 2);
-    }
-
-    await user.save();
-
-    return { accessToken, refreshToken };
-  }
-
-  static async me(userId: string) {
-    const user = await User.findById(userId).select("-password -refreshTokens");
-
-    if (!user) {
-      const error = new Error("Utilisateur introuvable.") as Error & {
-        code?: string;
-      };
-
-      error.code = "USER_NOT_FOUND";
-      throw error;
-    }
-
-    if (user.isDeleted) {
-      const error = new Error("Ce compte a été supprimé.") as Error & {
-        code?: string;
-      };
-
-      error.code = "ACCOUNT_DELETED";
-      throw error;
-    }
-
-    return user;
-  }
-
-  static async refresh(
-    token: string,
-    deviceInfo: string
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    let decoded;
-
-    try {
-      decoded = verifyRefreshToken(token);
     } catch (error) {
-      const err = new Error("Token de rafraîchissement invalide.") as Error & {
-        code?: string;
-      };
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
 
-      err.code = "INVALID_REFRESH_TOKEN";
-      throw err;
+      console.error("Erreur lors de l'inscription :", error);
+      throw new Error("Erreur lors de l'inscription");
     }
+  }
 
-    const user = await User.findById(decoded.sub);
+  /**
+   * Vérification de l'email - Génère les tokens ICI
+   */
+  static async verifyEmail(data: VerifyEmailDTO): Promise<VerifyEmailResponse> {
+    try {
+      const { token, ipAddress, userAgent } = data;
 
-    if (!user) {
-      const error = new Error("Utilisateur introuvable.") as Error & {
-        code?: string;
+      const decoded = JWTUtils.verifyEmailToken(token);
+
+      if (decoded.type !== "email-verification") {
+        const error = new Error("Token invalide");
+        (error as Error & { code?: string }).code = "INVALID_TOKEN";
+        throw error;
+      }
+
+      const user = await UserModel.findById(decoded.userId)
+        .select(
+          "+emailVerificationToken +emailVerificationExpires +refreshTokens"
+        )
+        .populate("referredBy", {
+          _id: 1,
+          username: 1,
+        });
+
+      if (!user) {
+        const error = new Error("Utilisateur non trouvé");
+        (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+        throw error;
+      }
+
+      if (user.emailVerified) {
+        const error = new Error("Email déjà vérifié. Veuillez vous connecter.");
+        (error as Error & { code?: string }).code = "EMAIL_ALREADY_VERIFIED";
+        throw error;
+      }
+
+      const hashedToken = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+      if (
+        user.emailVerificationToken !== hashedToken ||
+        !user.emailVerificationExpires ||
+        user.emailVerificationExpires < new Date()
+      ) {
+        const error = new Error("Token invalide ou expiré");
+        (error as Error & { code?: string }).code = "INVALID_TOKEN";
+        throw error;
+      }
+
+      await user.verifyEmail();
+      await user.incrementLoginCount();
+
+      const jwtPayload: JWTPayload = {
+        userId: user._id as unknown as string,
+        email: user.email,
+        roles: user.roles,
       };
 
-      error.code = "USER_NOT_FOUND";
+      const tokens = JWTUtils.generateTokens(jwtPayload);
+
+      await user.addRefreshToken(tokens.refreshToken, ipAddress, userAgent);
+
+      return {
+        user: {
+          id: user._id as unknown as string,
+          username: user.username,
+          email: user.email,
+          roles: user.roles,
+          referralCode: user.referralCode,
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+        },
+        tokens,
+        message: "Email vérifié ! Vous êtes maintenant connecté.",
+      };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error("Erreur lors de la vérification de l'email :", error);
+      throw new Error("Token invalide ou expiré");
+    }
+  }
+
+  /**
+   * Renvoyer l'email de vérification
+   */
+  static async resendVerificationEmail(
+    data: ResendVerificationEmailDTO
+  ): Promise<RegisterResponse> {
+    try {
+      const { email } = data;
+
+      const user = await UserModel.findByEmail(
+        email,
+        "+emailVerificationToken +emailVerificationExpires"
+      );
+
+      if (!user) {
+        const error = new Error("Utilisateur non trouvé");
+        (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+        throw error;
+      }
+
+      if (user.emailVerified) {
+        const error = new Error("Email déjà vérifié. Veuillez vous connecter.");
+        (error as Error & { code?: string }).code = "EMAIL_ALREADY_VERIFIED";
+        throw error;
+      }
+
+      const token = JWTUtils.generateEmailVerificationToken(
+        user._id as unknown as string
+      );
+
+      user.generateEmailVerificationToken(token);
+
+      user.save();
+
+      return {
+        user: {
+          id: user._id as unknown as string,
+          username: user.username,
+          email: user.email,
+          emailVerificationToken: token,
+        },
+        message:
+          "Email de vérification renvoyé avec succès. Vérifiez votre boîte de réception.",
+      };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error(
+        "Erreur lors du renvoi de l'email de vérification :",
+        error
+      );
+      throw new Error("Erreur lors du renvoi de l'email de vérification");
+    }
+  }
+
+  /**
+   * Demander une réinitialisation de mot de passe
+   */
+  static async forgotPassword(
+    data: ForgotPasswordDTO
+  ): Promise<ForgotPasswordResponse> {
+    try {
+      const { email } = data;
+
+      // ✅ 1. Validation de l'email
+      if (!email || !email.trim()) {
+        const error = new Error("Email requis");
+        (error as Error & { code?: string }).code = "EMAIL_REQUIRED";
+        throw error;
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        const error = new Error("Format d'email invalide");
+        (error as Error & { code?: string }).code = "INVALID_EMAIL_FORMAT";
+        throw error;
+      }
+
+      // ✅ 2. Rechercher l'utilisateur
+      const user = await UserModel.findOne({
+        email: email.toLowerCase(),
+      }).select("+passwordResetToken +passwordResetExpires");
+
+      // ⚠️ Important : Ne pas révéler si l'email existe ou non (sécurité)
+      // On retourne toujours un succès même si l'utilisateur n'existe pas
+      if (!user) {
+        return {
+          message:
+            "Si cet email existe, un lien de réinitialisation a été envoyé",
+        };
+      }
+
+      // ✅ 3. Vérifier que l'utilisateur a vérifié son email
+      if (!user.emailVerified) {
+        // On retourne quand même un succès pour ne pas révéler l'existence du compte
+        return {
+          message:
+            "Si cet email existe, un lien de réinitialisation a été envoyé",
+        };
+      }
+
+      // ✅ 4. Générer un token de réinitialisation (valide 1 heure)
+      const token = JWTUtils.generatePasswordResetToken(
+        user._id as unknown as string
+      );
+
+      user.generatePasswordResetToken(token);
+
+      await user.save();
+
+      return {
+        username: user.username,
+        email: user.email,
+        token,
+        message:
+          "Si cet email existe, un lien de réinitialisation a été envoyé",
+      };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error(
+        "Erreur lors du renvoi de l'email de vérification :",
+        error
+      );
+      throw new Error("Erreur lors du renvoi de l'email de vérification");
+    }
+  }
+
+  /**
+   * Réinitialiser le mot de passe avec un token
+   */
+  static async resetPassword(
+    token: string,
+    newPassword: string
+  ): Promise<{
+    message: string;
+    username: string;
+    email: string;
+  }> {
+    // ✅ 1. Validation du token
+    if (!token || !token.trim()) {
+      const error = new Error("Token de réinitialisation requis");
+      (error as Error & { code?: string }).code = "TOKEN_REQUIRED";
       throw error;
     }
 
-    const tokenExists = user.refreshTokens.some(
-      (rt) => rt.token === token && rt.expiresAt > new Date()
+    const decoded = JWTUtils.verifyEmailToken(token);
+
+    console.log(decoded);
+
+    if (decoded.type !== "reset-password") {
+      const error = new Error("Token invalide");
+      (error as Error & { code?: string }).code = "INVALID_TOKEN";
+      throw error;
+    }
+
+    const user = await UserModel.findById(decoded.userId).select(
+      "+password +passwordResetToken +passwordResetExpires"
     );
 
-    if (!tokenExists) {
-      const error = new Error(
-        "Token de rafraîchissement invalide ou expiré."
-      ) as Error & {
-        code?: string;
-      };
-
-      error.code = "INVALID_OR_EXPIRED_REFRESH_TOKEN";
+    if (!user) {
+      const error = new Error("Utilisateur non trouvé");
+      (error as Error & { code?: string }).code = "USER_NOT_FOUND";
       throw error;
     }
 
-    const userId = user._id.toString();
+    if (!user.emailVerified) {
+      const error = new Error(
+        "Email pas encore vérifié. Consultez votre boîte de réception."
+      );
+      (error as Error & { code?: string }).code = "EMAIL_NOT_VERIFIED";
+      throw error;
+    }
 
-    const accessToken = generateAccessToken(userId, user.email);
+    // ✅ 3. Vérifier que le nouveau mot de passe est différent de l'ancien
+    const isSamePassword = await user.comparePassword(newPassword);
 
-    user.refreshTokens = user.refreshTokens.filter((rt) => rt.token !== token);
+    if (isSamePassword) {
+      const error = new Error(
+        "Le nouveau mot de passe doit être différent de l'ancien"
+      );
+      (error as Error & { code?: string }).code = "SAME_PASSWORD";
+      throw error;
+    }
 
-    const newRefreshToken = generateRefreshToken(userId);
+    // ✅ 4. Hasher le token reçu pour le comparer avec celui en DB
+    const resetTokenHash = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
 
-    user.refreshTokens.push({
-      token: newRefreshToken,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      deviceInfo: deviceInfo,
-    });
+    if (
+      user.passwordResetToken !== resetTokenHash ||
+      !user.passwordResetExpires ||
+      user.passwordResetExpires < new Date()
+    ) {
+      const error = new Error("Token invalide ou expiré");
+      (error as Error & { code?: string }).code = "INVALID_TOKEN";
+      throw error;
+    }
+
+    // ✅ 5. Mettre à jour le mot de passe et supprimer le token de reset
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+
+    // ✅ 6. Invalider tous les refresh tokens existants (forcer reconnexion)
+    user.refreshTokens = [];
 
     await user.save();
 
     return {
-      accessToken: accessToken,
-      refreshToken: newRefreshToken,
+      username: user.username,
+      email: user.email,
+      message: "Mot de passe réinitialisé avec succès",
     };
   }
 
-  static async signOut(token: string): Promise<boolean> {
-    let decoded;
-
+  /**
+   * Connexion
+   */
+  static async login(data: LoginDTO): Promise<LoginResponse> {
     try {
-      decoded = verifyRefreshToken(token);
+      const { email, password, ipAddress, userAgent } = data;
+
+      const user = await UserModel.findOne({
+        email: email.toLowerCase(),
+      })
+        .select("+password +refreshTokens")
+        .populate("referredBy", {
+          _id: 1,
+          username: 1,
+        });
+
+      if (!user) {
+        const error = new Error("Email ou mot de passe incorrect");
+        (error as Error & { code?: string }).code = "INVALID_CREDENTIALS";
+        throw error;
+      }
+
+      const isPasswordValid = await user.comparePassword(password);
+
+      if (!isPasswordValid) {
+        const error = new Error("Email ou mot de passe incorrect");
+        (error as Error & { code?: string }).code = "INVALID_CREDENTIALS";
+        throw error;
+      }
+
+      if (!user.emailVerified) {
+        const error = new Error(
+          "Veuillez vérifier votre email avant de vous connecter"
+        );
+        (error as Error & { code?: string }).code = "EMAIL_NOT_VERIFIED";
+        throw error;
+      }
+
+      if (user.accountStatus === "SUSPENDED") {
+        const error = new Error(
+          "Votre compte est suspendu. Contactez le support."
+        );
+        (error as Error & { code?: string }).code = "ACCOUNT_SUSPENDED";
+        throw error;
+      }
+
+      if (user.accountStatus === "DELETED") {
+        const error = new Error("Ce compte n'existe plus");
+        (error as Error & { code?: string }).code = "ACCOUNT_DELETED";
+        throw error;
+      }
+
+      const jwtPayload: JWTPayload = {
+        userId: user._id as unknown as string,
+        email: user.email,
+        roles: user.roles,
+      };
+
+      const tokens = JWTUtils.generateTokens(jwtPayload);
+
+      await user.addRefreshToken(tokens.refreshToken, ipAddress, userAgent);
+      await user.incrementLoginCount();
+
+      return {
+        user: {
+          id: user._id as unknown as string,
+          username: user.username,
+          email: user.email,
+          roles: user.roles,
+          referralCode: user.referralCode,
+          emailVerified: user.emailVerified,
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+          referredBy: user.referredBy,
+          loginCount: user.loginCount || 0,
+          lastLoginAt: user.lastLoginAt,
+        },
+        tokens,
+      };
     } catch (error) {
-      const err = new Error("Token de rafraîchissement invalide.") as Error & {
-        code?: string;
-      };
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
 
-      err.code = "INVALID_REFRESH_TOKEN";
-      throw err;
+      console.error("Erreur lors de la connexion :", error);
+      throw new Error("Erreur lors de la connexion");
     }
-
-    await User.findByIdAndUpdate(decoded.sub, {
-      $pull: { refreshTokens: { token: token } },
-    });
-
-    return true;
   }
 
-  static async unlinkDiscord(user: Partial<IUser>): Promise<boolean> {
-    const userId = user.id;
+  /**
+   * Récupérer le profil de l'utilisateur connecté
+   */
+  static async getUserProfile(
+    data: GetUserProfileDTO
+  ): Promise<GetUserProfileResponse> {
+    try {
+      const { userId } = data;
 
-    const userFromDB = await User.findById(userId);
+      if (!userId) {
+        const error = new Error("ID utilisateur manquant");
+        (error as Error & { code?: string }).code = "MISSING_USER_ID";
+        throw error;
+      }
 
-    if (!userFromDB) {
-      const error = new Error("Utilisateur introuvable.") as Error & {
-        code?: string;
+      const user = await UserModel.findById(userId)
+        .select("-__v")
+        .populate("referredBy", {
+          _id: 1,
+          username: 1,
+        });
+
+      if (!user) {
+        const error = new Error("Utilisateur non trouvé");
+        (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+        throw error;
+      }
+
+      return {
+        user: {
+          id: user._id as unknown as string,
+          email: user.email,
+          username: user.username,
+          roles: user.roles,
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+          loginCount: user.loginCount || 0,
+          lastLoginAt: user.lastLoginAt,
+          emailVerified: user.emailVerified,
+        },
       };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
 
-      error.code = "USER_NOT_FOUND";
-      throw error;
+      console.error("Erreur de l'obtention de l'utilisateur :", error);
+      throw new Error("Erreur de l'obtention de l'utilisateur");
     }
-
-    if (!userFromDB.password) {
-      const error = new Error(
-        "Impossible de délier votre compte Discord : vous devez d'abord définir un mot de passe."
-      ) as Error & {
-        code?: string;
-      };
-
-      error.code = "PASSWORD_REQUIRED";
-      throw error;
-    }
-
-    userFromDB.discordId = null;
-    userFromDB.discordUsername = null;
-    userFromDB.discordDiscriminator = null;
-    userFromDB.authProvider = "LOCAL";
-
-    await userFromDB.save();
-
-    return true;
   }
+
+  /**
+   * Rafraîchir l'access token
+   */
+  static async refreshToken(
+    data: RefreshTokenDTO
+  ): Promise<RefreshTokenResponse> {
+    try {
+      const { refreshToken, ipAddress, userAgent } = data;
+
+      const decoded = JWTUtils.verifyRefreshToken(refreshToken);
+
+      // ✅ Vérifier que le token existe ET n'est pas expiré
+      const user = await UserModel.findOne({
+        _id: decoded.userId,
+        "refreshTokens.token": refreshToken,
+        "refreshTokens.expiresAt": { $gt: new Date() }, // Pas expiré
+      }).select("+refreshTokens");
+
+      if (!user) {
+        const error = new Error("Token invalide ou expiré");
+        (error as Error & { code?: string }).code = "INVALID_TOKEN";
+        throw error;
+      }
+
+      // ✅ Supprimer l'ancien refresh token
+      await user.removeRefreshToken(refreshToken);
+
+      const jwtPayload: JWTPayload = {
+        userId: user._id as unknown as string,
+        email: user.email,
+        roles: user.roles,
+      };
+
+      const tokens = JWTUtils.generateTokens(jwtPayload);
+
+      // ✅ Sauvegarder le nouveau refresh token avec expiration
+      await user.addRefreshToken(tokens.refreshToken, ipAddress, userAgent);
+
+      return tokens;
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error("Erreur de rafraîchissement du token :", error);
+      throw new Error("Token invalide ou expiré");
+    }
+  }
+
+  /**
+   * Déconnexion
+   */
+  static async logout(
+    userId: string,
+    refreshToken: string
+  ): Promise<{ message: string }> {
+    try {
+      const user = await UserModel.findById(userId).select("+refreshTokens");
+
+      if (!user) {
+        const error = new Error("Utilisateur non trouvé");
+        (error as Error & { code?: string }).code = "USER_NOT_FOUND";
+        throw error;
+      }
+
+      await user.removeRefreshToken(refreshToken);
+
+      return { message: "Déconnexion réussie" };
+    } catch (error) {
+      // Re-throw des erreurs métier
+      if ((error as Error & { code?: string }).code) {
+        throw error;
+      }
+
+      console.error("Erreur lors de la déconnexion :", error);
+      throw new Error("Erreur lors de la déconnexion");
+    }
+  }
+
+  /**
+   * ✅ Nettoyer les tokens expirés (à exécuter via un cron job)
+   */
+  static async cleanExpiredTokens(): Promise<void> {
+    await UserModel.updateMany(
+      {},
+      {
+        $pull: {
+          refreshTokens: {
+            expiresAt: { $lt: new Date() },
+          },
+        },
+      }
+    );
+  }
+
+  /**
+   * ✅ Nettoyer les tokens expirés : email & password (à exécuter via un cron job)
+   */
 }
-
-export default AuthService;

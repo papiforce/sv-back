@@ -1,54 +1,104 @@
 import jwt from "jsonwebtoken";
 
-import { IUser } from "../models";
-
 const {
-  ACCESS_TOKEN_SECRET,
-  REFRESH_TOKEN_SECRET,
-  EMAIL_VERIFICATION_TOKEN_SECRET,
+  JWT_SECRET = "your-super-secret-key-change-in-prod",
+  JWT_REFRESH_SECRET = "your-refresh-secret",
+  JWT_EXPIRES_IN = 900, // 15 minutes
+  JWT_REFRESH_EXPIRES_IN = 604800, // 7 days
 } = process.env;
 
-export const generateAccessToken = (userId: string, email: string) => {
-  return jwt.sign({ sub: userId, email }, ACCESS_TOKEN_SECRET, {
-    expiresIn: "1h",
-  });
-};
+export interface JWTPayload {
+  userId: string;
+  email: string;
+  roles: string[];
+}
 
-export const generateRefreshToken = (userId: string) => {
-  return jwt.sign({ sub: userId }, REFRESH_TOKEN_SECRET, { expiresIn: "7d" });
-};
+export class JWTUtils {
+  /**
+   * Génère un access token
+   */
+  static generateAccessToken(payload: JWTPayload): string {
+    return jwt.sign(payload, JWT_SECRET, {
+      expiresIn: 900,
+    });
+  }
 
-export const generateEmailVerificationToken = (user: IUser) => {
-  return jwt.sign(
-    {
-      sub: user._id,
-      email: user.email,
-      type: "EMAIL_VERIFICATION",
-    },
-    EMAIL_VERIFICATION_TOKEN_SECRET!,
-    { expiresIn: "24h" }
-  );
-};
+  /**
+   * Génère un refresh token
+   */
+  static generateRefreshToken(userId: string): string {
+    return jwt.sign({ userId }, JWT_REFRESH_SECRET, {
+      expiresIn: 604800,
+    });
+  }
 
-export const generateDiscordRefreshToken = (userId: string) => {
-  return jwt.sign(
-    {
-      sub: userId,
-      type: "REFRESH",
-    },
-    process.env.REFRESH_TOKEN_SECRET!,
-    { expiresIn: "7d" }
-  );
-};
+  /**
+   * Génère les deux tokens
+   */
+  static generateTokens(payload: JWTPayload): {
+    accessToken: string;
+    refreshToken: string;
+  } {
+    return {
+      accessToken: this.generateAccessToken(payload),
+      refreshToken: this.generateRefreshToken(payload.userId),
+    };
+  }
 
-export const verifyAccessToken = (token: string) => {
-  return jwt.verify(token, ACCESS_TOKEN_SECRET);
-};
+  /**
+   * ✅ Calculer la date d'expiration du refresh token
+   */
+  static getRefreshTokenExpiration(): Date {
+    const expiresInSeconds = parseInt(
+      JWT_REFRESH_EXPIRES_IN as unknown as string,
+      10
+    );
+    return new Date(Date.now() + expiresInSeconds * 1000);
+  }
 
-export const verifyRefreshToken = (token: string) => {
-  return jwt.verify(token, REFRESH_TOKEN_SECRET);
-};
+  /**
+   * Vérifie un access token
+   */
+  static verifyAccessToken(token: string): JWTPayload {
+    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+  }
 
-export const verifyEmailToken = (token: string) => {
-  return jwt.verify(token, EMAIL_VERIFICATION_TOKEN_SECRET);
-};
+  /**
+   * Vérifie un refresh token
+   */
+  static verifyRefreshToken(token: string): { userId: string } {
+    return jwt.verify(token, JWT_REFRESH_SECRET) as { userId: string };
+  }
+
+  /**
+   * Génère un token de vérification d'email
+   */
+  static generateEmailVerificationToken(userId: string): string {
+    return jwt.sign({ userId, type: "email-verification" }, JWT_SECRET, {
+      expiresIn: 86400, // 24h
+    });
+  }
+
+  /**
+   * Génère un token de récupération de mot de passe
+   */
+  static generatePasswordResetToken(userId: string): string {
+    return jwt.sign(
+      {
+        userId,
+        type: "reset-password",
+      },
+      JWT_SECRET,
+      {
+        expiresIn: 3600, // 1 heure en secondes
+      }
+    );
+  }
+
+  /**
+   * Vérifie un token de vérification d'email
+   */
+  static verifyEmailToken(token: string): { userId: string; type: string } {
+    return jwt.verify(token, JWT_SECRET) as { userId: string; type: string };
+  }
+}

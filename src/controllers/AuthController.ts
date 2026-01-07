@@ -1,418 +1,718 @@
 import { Request, Response } from "express";
 
-import { AuthService } from "../services";
+import { AuthService } from "@/services/AuthService";
+import EmailService from "@/services/EmailService";
 
-class AuthController {
-  async signUp(req: Request, res: Response): Promise<void> {
+import {
+  welcomeEmail,
+  verificationEmail,
+  forgotPasswordEmail,
+  resetPasswordEmail,
+} from "@/emails";
+
+export class AuthController {
+  /**
+   * POST /api/v1/auth/register
+   * Inscription d'un nouvel utilisateur
+   */
+  static async register(req: Request, res: Response): Promise<void> {
     try {
-      const { username, email, password } = req.body;
+      const { username, email, password, referredBy } = req.body;
 
-      let errors: Record<string, string> = {};
+      const { user, message } = await AuthService.register({
+        username,
+        email,
+        password,
+        referredBy,
+      });
 
-      if (!username || username === "") {
-        errors["username"] = "Le nom d'utilisateur est requis.";
-      }
+      try {
+        const emailContent = verificationEmail(
+          username,
+          `${process.env.FRONTEND_URL}/verify-email?token=${user.emailVerificationToken}`
+        );
 
-      if (!email || email === "") {
-        errors["email"] = "L'email est requis.";
-      }
-
-      if (!password || password === "") {
-        errors["password"] = "Le mot de passe est requis.";
-      }
-
-      if (Object.keys(errors).length > 0) {
-        res.status(400).json({
-          success: false,
-          errors,
+        const emailResult = await EmailService.sendEmail({
+          to: email,
+          subject: "✅ Vérifiez votre adresse email pour Scanverse",
+          html: emailContent,
         });
 
-        return;
+        if (!emailResult.success) {
+          console.error(
+            `⚠️ Email de vérification non envoyé pour ${email}:`,
+            emailResult.error
+          );
+          // On continue quand même, l'inscription est valide
+        }
+      } catch (emailError) {
+        // Log de l'erreur mais on ne bloque pas l'inscription
+        console.error(
+          `❌ Erreur lors de l'envoi de l'email à ${email}:`,
+          emailError
+        );
       }
 
-      await AuthService.signUp({ username, email, password });
+      delete user.emailVerificationToken;
 
       res.status(201).json({
         success: true,
+        data: { user },
+        message: message,
       });
-
-      return;
     } catch (error) {
-      const errors = [
-        "EMAIL_AND_USERNAME_ALREADY_USED",
-        "EMAIL_ALREADY_USED",
-        "USERNAME_ALREADY_USED",
-        "EMAIL_ALREADY_USED_BY_DISCORD",
-      ];
+      const err = error as Error & { code?: string };
 
-      if (errors.includes((error as Error & { code?: string }).code || "")) {
-        res.status(409).json({
+      if (err.code === "EMAIL_IN_USE") {
+        res.status(400).json({
           success: false,
-          errors: { global: (error as Error).message },
+          message: "L'adresse email est déjà utilisée",
+          errors: { email: err.message },
         });
-
         return;
       }
 
+      if (err.code === "USERNAME_IN_USE") {
+        res.status(400).json({
+          success: false,
+          message: "Le nom d'utilisateur est déjà utilisé",
+          errors: { username: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "INVALID_REFERRAL_CODE") {
+        res.status(400).json({
+          success: false,
+          message: "Code de parrainage invalide",
+          errors: { referredBy: err.message },
+        });
+        return;
+      }
+
+      console.error("Erreur lors de l'inscription :", err);
       res.status(500).json({
         success: false,
-        message: "Une erreur est survenue lors de l'inscription.",
-        errors: { global: (error as Error).message },
+        message: "Erreur lors de l'inscription",
+        errors: { global: err.message },
       });
-
-      return;
     }
   }
 
-  async verifyEmail(req: Request, res: Response): Promise<void> {
+  /**
+   * POST /api/v1/auth/verify-email
+   * Vérification de l'email
+   */
+  static async verifyEmail(req: Request, res: Response): Promise<void> {
     try {
       const { token } = req.body;
 
-      if (!token) {
-        res.status(400).json({ message: "Token requis" });
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = req.get("user-agent");
 
-        return;
-      }
+      const { user, tokens, message } = await AuthService.verifyEmail({
+        token,
+        ipAddress,
+        userAgent,
+      });
+      try {
+        const emailContent = welcomeEmail(
+          user.username,
+          `${process.env.FRONTEND_URL}/profil`,
+          user.referralCode || ""
+        );
 
-      await AuthService.verifyEmail(token);
-
-      res.status(200).json({ success: true });
-
-      return;
-    } catch (error) {
-      const errors = ["EMAIL_ALREADY_VERIFIED", "EMAIL_MISMATCH"];
-
-      if (errors.includes((error as Error & { code?: string }).code || "")) {
-        res.status(409).json({
-          success: false,
-          errors: { global: (error as Error).message },
+        const emailResult = await EmailService.sendEmail({
+          to: user.email,
+          subject: "✨ Bienvenue sur Scanverse",
+          html: emailContent,
         });
 
-        return;
+        if (!emailResult.success) {
+          console.error(
+            `⚠️ Email de bienvenue non envoyé pour ${user.email}:`,
+            emailResult.error
+          );
+          // On continue quand même, l'inscription est valide
+        }
+      } catch (emailError) {
+        // Log de l'erreur mais on ne bloque pas l'inscription
+        console.error(
+          `❌ Erreur lors de l'envoi de l'email à ${user.email}:`,
+          emailError
+        );
       }
 
-      if ((error as Error & { code?: string }).code === "TOKEN_INVALID") {
-        res.status(400).json({
-          success: false,
-          errors: { global: (error as Error).message },
-        });
-
-        return;
-      }
-
-      if ((error as Error & { code?: string }).code === "USER_NOT_FOUND") {
-        res.status(404).json({
-          success: false,
-          errors: { global: (error as Error).message },
-        });
-
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Une erreur est survenue lors de la vérification de votre adresse email.",
-        errors: { global: (error as Error).message },
+      res.cookie("refreshToken", tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-      return;
+      res.status(200).json({
+        success: true,
+        data: {
+          user: user,
+          accessToken: tokens.accessToken,
+        },
+        message,
+      });
+    } catch (error) {
+      const err = error as Error & { code?: string };
+
+      if (err.code === "INVALID_TOKEN") {
+        res.status(400).json({
+          success: false,
+          message: "Token invalide ou expiré",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "EMAIL_ALREADY_VERIFIED") {
+        res.status(400).json({
+          success: false,
+          message: "Email déjà vérifié",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "TOKEN_ALREADY_USED") {
+        res.status(400).json({
+          success: false,
+          message: "Token déjà utilisé",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      console.error("Erreur lors de la vérification de l'email :", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la vérification de l'email",
+        errors: { global: err.message },
+      });
     }
   }
 
-  async resendVerificationEmail(req: Request, res: Response): Promise<void> {
+  /**
+   * POST /api/v1/auth/resend-verification
+   * Renvoyer l'email de vérification
+   */
+  static async resendVerificationEmail(
+    req: Request,
+    res: Response
+  ): Promise<void> {
     try {
       const { email } = req.body;
 
-      if (!email) {
-        res.status(400).json({ message: "Email requis" });
-
-        return;
-      }
-
-      await AuthService.resendVerification(email);
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      if ((error as Error & { code?: string }).code === "USER_NOT_FOUND") {
-        res.status(404).json({
-          success: false,
-          errors: { global: (error as Error).message },
-        });
-
-        return;
-      }
-
-      if (
-        (error as Error & { code?: string }).code === "EMAIL_ALREADY_VERIFIED"
-      ) {
-        res.status(409).json({
-          success: false,
-          errors: { global: (error as Error).message },
-        });
-
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        message: "Une erreur est survenue lors de l'envoie du mail.",
-        errors: { global: (error as Error).message },
+      const { user, message } = await AuthService.resendVerificationEmail({
+        email,
       });
 
-      return;
+      try {
+        const emailContent = verificationEmail(
+          user.username,
+          `${process.env.FRONTEND_URL}/verify-email?token=${user.emailVerificationToken}`
+        );
+
+        const emailResult = await EmailService.sendEmail({
+          to: email,
+          subject: "✅ Vérifiez votre adresse email pour Scanverse",
+          html: emailContent,
+        });
+
+        if (!emailResult.success) {
+          console.error(
+            `⚠️ Email de vérification non envoyé pour ${email}:`,
+            emailResult.error
+          );
+          // On continue quand même, l'inscription est valide
+        }
+      } catch (emailError) {
+        // Log de l'erreur mais on ne bloque pas l'inscription
+        console.error(
+          `❌ Erreur lors de l'envoi de l'email à ${email}:`,
+          emailError
+        );
+      }
+
+      delete user.emailVerificationToken;
+
+      res.status(200).json({ success: true, data: { user }, message });
+    } catch (error) {
+      const err = error as Error & { code?: string };
+
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "EMAIL_ALREADY_VERIFIED") {
+        res.status(400).json({
+          success: false,
+          message: "Email déjà vérifié",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      console.error("Erreur lors du renvoi de l'email de vérification :", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors du renvoi de l'email de vérification",
+        errors: { global: (error as Error).message },
+      });
     }
   }
 
-  async signIn(req: Request, res: Response): Promise<void> {
+  /**
+   * POST /api/v1/auth/forgot-password
+   * Renvoyer l'email de vérification
+   */
+  static async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = req.body;
+
+      // ✅ 1. Appeler le service
+      const {
+        username,
+        email: userEmail,
+        token,
+        message,
+      } = await AuthService.forgotPassword({ email });
+
+      if (username && userEmail) {
+        try {
+          const emailContent = forgotPasswordEmail(
+            username,
+            `${process.env.FRONTEND_URL}/reset-password?token=${token}`
+          );
+
+          const emailResult = await EmailService.sendEmail({
+            to: email,
+            subject: "🔑 Créer un nouveau mot de passe",
+            html: emailContent,
+          });
+
+          if (!emailResult.success) {
+            console.error(
+              `⚠️ Email de récupération de mot de passe non envoyé pour ${email}:`,
+              emailResult.error
+            );
+            // On continue quand même, l'inscription est valide
+          }
+        } catch (emailError) {
+          // Log de l'erreur mais on ne bloque pas l'inscription
+          console.error(
+            `❌ Erreur lors de l'envoi de l'email à ${email}:`,
+            emailError
+          );
+        }
+      }
+
+      // ✅ 3. Réponse de succès
+      res.status(200).json({
+        success: true,
+        message: message,
+      });
+    } catch (error: any) {
+      const err = error as Error & { code?: string };
+
+      // ✅ Gestion des erreurs spécifiques
+      if (
+        err.code === "EMAIL_REQUIRED" ||
+        err.code === "INVALID_EMAIL_FORMAT"
+      ) {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          code: error.code,
+        });
+        return;
+      }
+
+      if (err.code === "EMAIL_SEND_ERROR") {
+        res.status(500).json({
+          success: false,
+          message:
+            "Erreur lors de l'envoi de l'email. Veuillez réessayer plus tard.",
+          code: error.code,
+        });
+        return;
+      }
+
+      // ✅ Erreur générique
+      console.error("Erreur lors de la demande de réinitialisation:", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la demande de réinitialisation",
+      });
+    }
+  }
+
+  /**
+   * POST /api/auth/reset-password
+   * Réinitialiser le mot de passe avec un token
+   * @access Public
+   */
+  static async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { token, newPassword } = req.body;
+
+      // ✅ 1. Validation basique
+      if (!token) {
+        res.status(400).json({
+          success: false,
+          message: "Token de réinitialisation requis",
+          code: "TOKEN_REQUIRED",
+        });
+        return;
+      }
+
+      if (!newPassword) {
+        res.status(400).json({
+          success: false,
+          message: "Nouveau mot de passe requis",
+          code: "PASSWORD_REQUIRED",
+        });
+        return;
+      }
+
+      // ✅ 2. Appeler le service
+      const { username, email, message } = await AuthService.resetPassword(
+        token,
+        newPassword
+      );
+
+      try {
+        const emailContent = resetPasswordEmail(username);
+
+        const emailResult = await EmailService.sendEmail({
+          to: email,
+          subject: "🔑 Votre mot de passe a été modifié",
+          html: emailContent,
+        });
+
+        if (!emailResult.success) {
+          console.error(
+            `⚠️ Email de vérification non envoyé pour ${email}:`,
+            emailResult.error
+          );
+          // On continue quand même, l'inscription est valide
+        }
+      } catch (emailError) {
+        // Log de l'erreur mais on ne bloque pas l'inscription
+        console.error(
+          `❌ Erreur lors de l'envoi de l'email à ${email}:`,
+          emailError
+        );
+      }
+
+      // ✅ 3. Réponse de succès
+      res.status(200).json({
+        success: true,
+        message,
+      });
+    } catch (error: any) {
+      const err = error as Error & { code?: string };
+
+      // ✅ Gestion des erreurs spécifiques
+      if (
+        err.code === "TOKEN_REQUIRED" ||
+        err.code === "INVALID_PASSWORD" ||
+        err.code === "SAME_PASSWORD" ||
+        err.code === "INVALID_OR_EXPIRED_TOKEN" ||
+        err.code === "EMAIL_NOT_VERIFIED" ||
+        err.code === "INVALID_TOKEN"
+      ) {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      if (err.code === "USER_NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+          errors: { token: err.message },
+        });
+        return;
+      }
+
+      // ✅ Erreur générique
+      console.error("Erreur lors de la réinitialisation du mot de passe:", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la réinitialisation du mot de passe",
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/auth/login
+   * Connexion d'un utilisateur
+   */
+  static async login(req: Request, res: Response): Promise<void> {
     try {
       const { email, password } = req.body;
 
-      let errors: Record<string, string> = {};
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = req.get("user-agent");
 
-      if (!email || email === "") {
-        errors["email"] = "L'email est requis.";
-      }
-
-      if (!password || password === "") {
-        errors["password"] = "Le mot de passe est requis.";
-      }
-
-      if (Object.keys(errors).length > 0) {
-        res.status(400).json({
-          success: false,
-          errors,
-        });
-        return;
-      }
-
-      const user = await AuthService.signIn(
+      const { user, tokens } = await AuthService.login({
         email,
         password,
-        req.headers["user-agent"]
-      );
+        ipAddress,
+        userAgent,
+      });
+
+      res.cookie("refreshToken", tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+      });
 
       res.status(200).json({
         success: true,
-        data: user,
+        data: {
+          user,
+          accessToken: tokens.accessToken,
+        },
       });
     } catch (error) {
-      const errorsCode = [
-        "INVALID_CREDENTIALS",
-        "ACCOUNT_DELETED",
-        "EMAIL_NOT_VERIFIED",
-      ];
+      const err = error as Error & { code?: string };
 
-      if (
-        errorsCode.includes((error as Error & { code?: string }).code || "")
-      ) {
+      if (err.code === "INVALID_CREDENTIALS") {
         res.status(401).json({
           success: false,
-          errors: { global: (error as Error).message },
+          message: "Email ou mot de passe invalide",
+          errors: { global: err.message },
         });
-
         return;
       }
 
-      res.status(500).json({
-        success: false,
-        message: "Une erreur est survenue lors de la connexion.",
-        errors: { global: (error as Error).message },
-      });
-
-      return;
-    }
-  }
-
-  async discordSignIn(req: Request, res: Response): Promise<void> {
-    try {
-      const user = req.user as any;
-
-      if (!user) {
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_user`);
+      if (err.code === "EMAIL_NOT_VERIFIED") {
+        res.status(403).json({
+          success: false,
+          message: "Email non vérifié",
+          errors: { global: err.message },
+        });
+        return;
       }
 
-      const deviceInfo = req.headers["user-agent"] || "Discord OAuth";
+      if (err.code === "ACCOUNT_SUSPENDED" || err.code === "ACCOUNT_DELETED") {
+        res.status(403).json({
+          success: false,
+          message: "Compte suspendu",
+          errors: { global: err.message },
+        });
+        return;
+      }
 
-      const { accessToken, refreshToken } = await AuthService.discordSignIn(
-        user,
-        deviceInfo
-      );
-
-      const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}&provider=DISCORD`;
-
-      res.redirect(redirectUrl);
-
-      return;
-    } catch (error) {
-      console.error("❌ Erreur Discord callback:", error);
-
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=callback_failed`);
-
-      return;
+      console.error("Erreur lors de la connexion :", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la connexion",
+        errors: { global: err.message },
+      });
     }
   }
 
-  async discordLinkCallback(req: Request, res: Response): Promise<void> {
-    const { FRONTEND_URL } = process.env;
-
+  /**
+   * GET /api/v1/auth/profile
+   * Récupérer le profil de l'utilisateur connecté
+   * @access Private (nécessite authMiddleware)
+   */
+  static async getProfile(req: Request, res: Response): Promise<void> {
     try {
-      res.redirect(`${FRONTEND_URL}/settings?success=discord_linked`);
-    } catch {
-      res.redirect(`${FRONTEND_URL}/settings?error=discord_link_failed`);
-    }
-  }
+      // ✅ 1. Récupérer l'userId depuis req.user (fourni par authMiddleware)
+      const userId = req.user?.userId;
 
-  async loggedUser(req: Request, res: Response): Promise<void> {
-    try {
-      res.status(200).json({ user: req.user });
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Utilisateur non authentifié",
+          code: "NOT_AUTHENTICATED",
+        });
+        return;
+      }
 
-      return;
-    } catch (error) {
-      if ((error as Error & { code?: string }).code === "USER_NOT_FOUND") {
+      // ✅ 2. Appeler le service
+      const result = await AuthService.getUserProfile({ userId });
+
+      // ✅ 3. Réponse de succès
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: "Profil récupéré avec succès",
+      });
+    } catch (error: any) {
+      const err = error as Error & { code?: string };
+
+      // ✅ Gestion des erreurs spécifiques
+      if (err.code === "MISSING_USER_ID") {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          code: error.code,
+        });
+        return;
+      }
+
+      if (err.code === "USER_NOT_FOUND") {
         res.status(404).json({
           success: false,
-          errors: { global: (error as Error).message },
+          message: error.message,
+          code: error.code,
         });
-
         return;
       }
 
-      if ((error as Error & { code?: string }).code === "ACCOUNT_DELETED") {
-        res.status(410).json({
-          success: false,
-          errors: { global: (error as Error).message },
-        });
-
-        return;
-      }
-
+      // ✅ Erreur générique
+      console.error("Erreur lors de la récupération du profil :", error);
       res.status(500).json({
         success: false,
-        message:
-          "Une erreur est survenue lors de la récupération de l'utilisateur connecté.",
-        errors: { global: (error as Error).message },
+        message: "Erreur lors de la récupération du profil",
+        errors: { global: err.message },
       });
-
-      return;
     }
   }
 
-  async refreshToken(req: Request, res: Response): Promise<void> {
+  /**
+   * POST /api/v1/auth/refresh
+   * Rafraîchir l'access token
+   */
+  static async refreshToken(req: Request, res: Response): Promise<void> {
     try {
-      const { refreshToken } = req.body;
+      const currentToken = req.cookies.refreshToken;
 
-      if (!refreshToken || refreshToken === "") {
-        res
-          .status(401)
-          .json({ success: false, message: "Refresh token manquant" });
-
+      if (!currentToken) {
+        res.status(401).json({
+          success: false,
+          message: "Refresh token manquant",
+        });
         return;
       }
 
-      const newTokens = await AuthService.refresh(
-        refreshToken,
-        req.headers["user-agent"]
-      );
+      const ipAddress =
+        (req.headers["x-forwarded-for"] as string) ||
+        req.socket.remoteAddress ||
+        "unknown";
+      const userAgent = req.headers["user-agent"] || "unknown";
+
+      const { accessToken, refreshToken } = await AuthService.refreshToken({
+        refreshToken: currentToken,
+        ipAddress,
+        userAgent,
+      });
+
+      // ✅ Envoyer le nouveau refresh token dans un cookie HTTP-only
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production", // HTTPS en prod
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+        path: "/",
+      });
 
       res.status(200).json({
         success: true,
-        tokens: newTokens,
+        data: {
+          accessToken: accessToken,
+        },
+        message: "Token rafraîchi avec succès",
       });
     } catch (error) {
-      const errorsCode = [
-        "INVALID_REFRESH_TOKEN",
-        "USER_NOT_FOUND",
-        "INVALID_OR_EXPIRED_REFRESH_TOKEN",
-      ];
+      const err = error as Error & { code?: string };
 
-      if (
-        errorsCode.includes((error as Error & { code?: string }).code || "")
-      ) {
-        res.status(403).json({
+      if (err.code === "INVALID_TOKEN") {
+        res.status(401).json({
           success: false,
-          errors: { global: (error as Error).message },
+          message: "Token invalide ou expiré",
+          errors: { global: err.message },
         });
-
         return;
       }
 
-      res.status(500).json({
+      console.error("Erreur lors du rafraîchissement du token:", error);
+      res.status(401).json({
         success: false,
-        message: "Une erreur est survenue lors du rafraîchissement du token.",
-        errors: { global: (error as Error).message },
+        message: "Token invalide ou expiré",
       });
-
-      return;
     }
   }
 
-  async signOut(req: Request, res: Response): Promise<void> {
+  /**
+   * POST /api/v1/auth/logout
+   * Déconnecter l'utilisateur
+   */
+  static async logout(req: Request, res: Response): Promise<void> {
     try {
-      const { refreshToken } = req.body;
+      const userId = req.user?.userId;
 
-      if (!refreshToken || refreshToken === "") {
-        res
-          .status(401)
-          .json({ success: false, message: "Refresh token manquant" });
-
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: "Utilisateur non authentifié",
+          code: "NOT_AUTHENTICATED",
+        });
         return;
       }
 
-      const isLoggedOut = await AuthService.signOut(refreshToken);
+      const refreshToken = req.cookies.refreshToken;
+
+      if (refreshToken) {
+        await AuthService.logout(userId, refreshToken);
+      }
+
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+        path: "/",
+      });
 
       res.status(200).json({
-        success: isLoggedOut,
+        success: true,
+        message: "Déconnexion réussie",
       });
-
-      return;
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Une erreur est survenue lors de la déconnexion.",
-        errors: { global: (error as Error).message },
-      });
+      const err = error as Error & { code?: string };
 
-      return;
-    }
-  }
-
-  async unlinkDiscord(req: Request, res: Response): Promise<void> {
-    try {
-      const user = req.user;
-
-      await AuthService.unlinkDiscord(user);
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      if ((error as Error & { code?: string }).code === "USER_NOT_FOUND") {
+      if (err.code === "USER_NOT_FOUND") {
         res.status(404).json({
           success: false,
-          errors: { global: (error as Error).message },
+          message: "Utilisateur non trouvé",
+          errors: { global: err.message },
         });
-
         return;
       }
 
-      if ((error as Error & { code?: string }).code === "PASSWORD_REQUIRED") {
-        res.status(400).json({
-          success: false,
-          errors: { global: (error as Error).message },
-        });
-
-        return;
-      }
-
+      console.error("Erreur lors de la déconnexion :", error);
       res.status(500).json({
         success: false,
-        message:
-          "Une erreur est survenue lors de la déconnexion de votre compte discord.",
-        errors: { global: (error as Error).message },
+        message: "Erreur lors de la déconnexion",
       });
-
-      return;
     }
   }
 }
-
-export default new AuthController();

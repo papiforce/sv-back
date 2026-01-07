@@ -1,45 +1,93 @@
 import { Router } from "express";
 
-import { passport } from "../config";
+import { AuthController } from "@/controllers/AuthController";
 
-import { authenticateToken } from "../middlewares";
-import { AuthController } from "../controllers";
+import { validateRequest } from "@/middlewares/validateRequest";
+import { authMiddleware } from "@/middlewares/AuthMiddleware";
+
+import {
+  registerValidator,
+  verifyEmailValidator,
+  resetPasswordValidator,
+} from "@/validators/AuthValidator";
 
 const router = Router();
 
-router.get("/discord", passport.authenticate("discord"));
-router.get(
-  "/discord/callback",
-  passport.authenticate("discord", {
-    session: false,
-    failureRedirect: `${process.env.FRONTEND_URL}/login?error=discord_auth_failed`,
-  }),
-  AuthController.discordSignIn
-);
-router.get(
-  "/discord/link",
-  authenticateToken,
-  passport.authenticate("discord", {
-    session: false,
-    state: "link_account",
-  })
-);
-router.get(
-  "/discord/link/callback",
-  passport.authenticate("discord", { session: false }),
-  AuthController.discordLinkCallback
+/**
+ * @route   POST /api/v1/auth/register
+ * @desc    Inscription d'un nouvel utilisateur
+ * @access  Public
+ */
+router.post(
+  "/register",
+  registerValidator,
+  validateRequest,
+  AuthController.register
 );
 
-router.get("/me", authenticateToken, AuthController.loggedUser);
+/**
+ * @route   POST /api/v1/auth/verify-email
+ * @desc    Vérifier l'email avec le token
+ * @access  Public
+ */
+router.post(
+  "/verify-email",
+  verifyEmailValidator,
+  validateRequest,
+  AuthController.verifyEmail
+);
 
-router.post("/sign-up", AuthController.signUp);
-router.post("/verify-email", AuthController.verifyEmail);
+/**
+ * @route   POST /api/v1/auth/resend-verification
+ * @desc    Renvoyer l'email de vérification
+ * @access  Public
+ */
 router.post("/resend-verification", AuthController.resendVerificationEmail);
 
-router.post("/sign-in", AuthController.signIn);
-router.post("/refresh", AuthController.refreshToken);
-router.post("/logout", AuthController.refreshToken);
+/**
+ * @route   POST /api/v1/auth/forgot-password
+ * @desc    Demander une réinitialisation de mot de passe
+ * @access  Public
+ */
+router.post("/forgot-password", AuthController.forgotPassword);
 
-router.post("/discord/unlink", authenticateToken, AuthController.unlinkDiscord);
+/**
+ * @route   POST /api/v1/auth/reset-password/:token
+ * @desc    Réinitialiser le mot de passe
+ * @access  Public
+ */
+router.post(
+  "/reset-password",
+  resetPasswordValidator,
+  AuthController.resetPassword
+);
+
+/**
+ * @route   POST /api/v1/auth/login
+ * @desc    Connexion d'un utilisateur
+ * @access  Public
+ */
+router.post("/login", AuthController.login);
+
+/**
+ * @route   GET /api/v1/auth/login
+ * @desc    Récupérer les informations de l'utilisateur
+ * @access  Private
+ */
+router.get("/profile", authMiddleware, AuthController.getProfile);
+
+/**
+ * @route   POST /api/v1/auth/refresh
+ * @desc    Rafraîchir l'access token
+ * @access  Public (cookie requis)
+ */
+router.post("/refresh", AuthController.refreshToken);
+
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Déconnexion d'un utilisateur
+ * @access  Private
+ */
+router.post("/logout", authMiddleware, AuthController.logout);
 
 export default router;
