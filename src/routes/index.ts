@@ -1,6 +1,8 @@
 import { Application, Request, Response } from "express";
+
 import WaitlistRoutes from "./WaitlistRoutes";
 import AuthRoutes from "./AuthRoutes";
+import CatalogRoutes from "./CatalogRoutes";
 
 /**
  * Configuration centrale des routes de l'application
@@ -31,6 +33,12 @@ const routes = (
    * @desc Gestion de l'authentification et des utilisateurs
    */
   app.use(`${API_ROUTE}/auth`, AuthRoutes);
+
+  /**
+   * @route /api/v1/catalog
+   * @desc Gestion du catalogue
+   */
+  app.use(`${API_ROUTE}/catalog`, CatalogRoutes);
 
   // ====================================
   // ROUTE DE SANTÉ (HEALTH CHECK)

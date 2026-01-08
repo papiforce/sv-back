@@ -380,7 +380,6 @@ export class AuthController {
         res.status(400).json({
           success: false,
           message: "Token de réinitialisation requis",
-          code: "TOKEN_REQUIRED",
         });
         return;
       }
@@ -389,7 +388,6 @@ export class AuthController {
         res.status(400).json({
           success: false,
           message: "Nouveau mot de passe requis",
-          code: "PASSWORD_REQUIRED",
         });
         return;
       }

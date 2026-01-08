@@ -33,7 +33,6 @@ export const authMiddleware = async (
       res.status(401).json({
         success: false,
         message: "Token d'authentification manquant",
-        code: "NO_TOKEN",
       });
       return;
     }
@@ -45,7 +44,6 @@ export const authMiddleware = async (
       res.status(401).json({
         success: false,
         message: "Token d'authentification invalide",
-        code: "INVALID_TOKEN",
       });
       return;
     }
@@ -66,7 +64,6 @@ export const authMiddleware = async (
       res.status(401).json({
         success: false,
         message: "Token expiré",
-        code: "TOKEN_EXPIRED",
       });
       return;
     }
@@ -75,7 +72,6 @@ export const authMiddleware = async (
       res.status(401).json({
         success: false,
         message: "Token invalide",
-        code: "INVALID_TOKEN",
       });
       return;
     }
@@ -84,7 +80,6 @@ export const authMiddleware = async (
     res.status(401).json({
       success: false,
       message: "Authentification échouée",
-      code: "AUTH_FAILED",
     });
   }
 };
@@ -99,7 +94,6 @@ export const requireRoles = (...allowedRoles: string[]) => {
       res.status(401).json({
         success: false,
         message: "Non authentifié",
-        code: "NOT_AUTHENTICATED",
       });
       return;
     }
@@ -111,9 +105,6 @@ export const requireRoles = (...allowedRoles: string[]) => {
       res.status(403).json({
         success: false,
         message: "Accès refusé : permissions insuffisantes",
-        code: "INSUFFICIENT_PERMISSIONS",
-        requiredRoles: allowedRoles,
-        userRoles: req.user.roles,
       });
       return;
     }

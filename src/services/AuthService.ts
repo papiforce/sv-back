@@ -1,8 +1,8 @@
 import crypto from "crypto";
 
-import UserModel, { IUser } from "../models/UserModel";
+import UserModel, { IUser } from "@/models/UserModel";
 
-import { JWTUtils, JWTPayload } from "../utils/jwt";
+import { JWTUtils, JWTPayload } from "@/utils/jwt";
 
 export interface RegisterDTO {
   username: string;
@@ -440,8 +440,6 @@ export class AuthService {
 
     const decoded = JWTUtils.verifyEmailToken(token);
 
-    console.log(decoded);
-
     if (decoded.type !== "reset-password") {
       const error = new Error("Token invalide");
       (error as Error & { code?: string }).code = "INVALID_TOKEN";
@@ -735,20 +733,79 @@ export class AuthService {
   /**
    * ✅ Nettoyer les tokens expirés (à exécuter via un cron job)
    */
-  static async cleanExpiredTokens(): Promise<void> {
-    await UserModel.updateMany(
-      {},
-      {
-        $pull: {
-          refreshTokens: {
-            expiresAt: { $lt: new Date() },
+  static async cleanExpiredTokens(): Promise<{
+    refreshTokens: number;
+    emailVerificationTokens: number;
+    passwordResetTokens: number;
+    totalModified: number;
+  }> {
+    const now = new Date();
+
+    try {
+      // ✅ Exécuter toutes les opérations en une seule transaction bulk
+      const bulkOps = [
+        // 1️⃣ Nettoyer les refresh tokens expirés
+        {
+          updateMany: {
+            filter: {
+              "refreshTokens.expiresAt": { $lt: now },
+            },
+            update: {
+              $pull: {
+                refreshTokens: {
+                  expiresAt: { $lt: now },
+                },
+              },
+            },
           },
         },
-      }
-    );
-  }
+        // 2️⃣ Nettoyer les tokens de vérification d'email expirés
+        {
+          updateMany: {
+            filter: {
+              emailVerificationExpires: { $lt: now },
+              emailVerificationToken: { $exists: true },
+            },
+            update: {
+              $unset: {
+                emailVerificationToken: "",
+                emailVerificationExpires: "",
+              },
+            },
+          },
+        },
+        // 3️⃣ Nettoyer les tokens de reset de mot de passe expirés
+        {
+          updateMany: {
+            filter: {
+              passwordResetExpires: { $lt: now },
+              passwordResetToken: { $exists: true },
+            },
+            update: {
+              $unset: {
+                passwordResetToken: "",
+                passwordResetExpires: "",
+              },
+            },
+          },
+        },
+      ];
 
-  /**
-   * ✅ Nettoyer les tokens expirés : email & password (à exécuter via un cron job)
-   */
+      const result = await UserModel.bulkWrite(bulkOps);
+
+      const stats = {
+        refreshTokens: result.modifiedCount || 0,
+        emailVerificationTokens: 0,
+        passwordResetTokens: 0,
+        totalModified: result.modifiedCount || 0,
+      };
+
+      console.log("🧹 Nettoyage des tokens expirés terminé:", stats);
+
+      return stats;
+    } catch (error) {
+      console.error("❌ Erreur lors du nettoyage des tokens:", error);
+      throw error;
+    }
+  }
 }

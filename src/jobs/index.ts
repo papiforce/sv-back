@@ -20,10 +20,10 @@ interface JobConfig {
 const jobs: JobConfig[] = [
   {
     name: "cleanExpiredTokens",
-    schedule: "0 3 * * *", // Tous les jours à 3h du matin
+    schedule: "0 * * * *", // Toutes les heures
     enabled: process.env.ENABLE_CLEAN_TOKENS_JOB !== "false",
     task: cleanExpiredTokens,
-    description: "Nettoie les refresh tokens expirés de la base de données",
+    description: "Nettoie les tokens expirés de la base de données",
   },
   // ✅ Ajoutez facilement d'autres jobs ici
 ];

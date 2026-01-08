@@ -3,7 +3,6 @@ import jwt from "jsonwebtoken";
 const {
   JWT_SECRET = "your-super-secret-key-change-in-prod",
   JWT_REFRESH_SECRET = "your-refresh-secret",
-  JWT_EXPIRES_IN = 900, // 15 minutes
   JWT_REFRESH_EXPIRES_IN = 604800, // 7 days
 } = process.env;
 
