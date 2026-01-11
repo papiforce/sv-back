@@ -50,6 +50,7 @@ function validateEnvironment(): void {
     "JWT_REFRESH_SECRET",
 
     "ENABLE_CLEAN_TOKENS_JOB",
+    "ENABLE_UPDATE_CATALOG",
   ];
   const missingEnvVars = requiredEnvVars.filter(
     (envVar) => !process.env[envVar]

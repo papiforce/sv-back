@@ -1,4 +1,4 @@
-import { AuthService } from "../services/AuthService";
+import { AuthService } from "@/services/AuthService";
 
 /**
  * 🧹 Job de nettoyage de TOUS les tokens expirés
@@ -21,7 +21,7 @@ export const cleanExpiredTokens = async (): Promise<void> => {
       └─ Total: ${result.totalModified} document(s) modifié(s)`
     );
   } catch (error) {
-    console.error("   └─ Erreur lors du nettoyage des tokens:", error);
+    console.error("   └─ Erreur lors du nettoyage des tokens : ", error);
     throw error;
   }
 };

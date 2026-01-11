@@ -2,6 +2,7 @@ import cron from "node-cron";
 
 // Import des jobs
 import { cleanExpiredTokens } from "./cleanTokensJob";
+import { updateCatalog } from "./updateCatalogJob";
 
 /**
  * Configuration des jobs
@@ -24,6 +25,13 @@ const jobs: JobConfig[] = [
     enabled: process.env.ENABLE_CLEAN_TOKENS_JOB !== "false",
     task: cleanExpiredTokens,
     description: "Nettoie les tokens expirés de la base de données",
+  },
+  {
+    name: "updateCatalog",
+    schedule: "0 8,16,23 * * *",
+    enabled: process.env.ENABLE_UPDATE_CATALOG !== "false",
+    task: updateCatalog,
+    description: "Met à jour le catalogue",
   },
   // ✅ Ajoutez facilement d'autres jobs ici
 ];

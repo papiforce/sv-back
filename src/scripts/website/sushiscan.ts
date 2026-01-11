@@ -12,10 +12,10 @@ import {
 import { IChapter } from "@/models/ChapterModel";
 
 export const isMangaExistingInSushiscan = async (
-  name: string,
+  title: string,
   slug?: string
 ) => {
-  const generatedSlug = slugify(slug ? slug : name);
+  const generatedSlug = slugify(slug ? slug : title);
   const url = `https://sushiscan.fr/catalogue/${generatedSlug}/`;
 
   try {
@@ -28,7 +28,7 @@ export const isMangaExistingInSushiscan = async (
     const $ = cheerio.load(response.data);
     const mangaTitle = $("h1").text().trim();
 
-    if (mangaTitle !== name) return false;
+    if (!mangaTitle.includes(title)) return false;
 
     if (mangaTitle) return true;
 
@@ -84,16 +84,6 @@ export const getDataFromSushiscan = async (
   data["tags"] = tags;
 
   // GET CHAPTERS
-  // const firstChapter = $(
-  //   "div.seriestucontent > div.seriestucontentr > div.seriestuhead > div.lastend > div:nth-child(1) > a"
-  // )
-  //   .text()
-  //   .trim();
-
-  // const firstChapterToArray = firstChapter.split(" ");
-  // const firstChapterNumber =
-  //   firstChapterToArray[firstChapterToArray.length - 1];
-
   const lastChapter = $(
     "div.seriestucontent > div.seriestucontentr > div.seriestuhead > div.lastend > div:nth-child(2) > a"
   )
@@ -128,14 +118,12 @@ export const getDataFromSushiscan = async (
       chapters.push({
         chapterNumber,
         releaseDate: new Date(releaseDate),
-        isVolume: chapterText.includes("Chapitre"),
+        isVolume: chapterText.includes("Volume"),
       } as Partial<IChapter>);
     }
   });
 
-  data["chapters"] = chapters.sort(
-    (a, b) => (a.chapterNumber ?? 0) - (b.chapterNumber ?? 0)
-  );
+  data["chapters"] = chapters;
 
   // GET OTHERS INFOS
   const infos = $(
@@ -189,15 +177,19 @@ export const getDataFromSushiscan = async (
   return data;
 };
 
-export const updateDataFromSushiscan = async (name: string) => {
-  const slug = slugify(name);
-  const url = `https://sushiscan.fr/catalogue/${slug}/`;
+export const updateDataFromSushiscan = async (
+  slug: string,
+  oldLastChapter: number
+) => {
+  const generatedSlug = slugify(slug);
+
+  const url = `https://sushiscan.fr/catalogue/${generatedSlug}/`;
 
   const response = await axios.get(url);
 
   const $ = cheerio.load(response.data);
 
-  const data: Partial<ICatalog> = {};
+  const data: Partial<ICatalog> & { chapters?: Partial<IChapter>[] } = {};
 
   // GET COVER
   data["coverImage"] = $("div.thumb-container > div.thumb > img").attr("src");
@@ -210,13 +202,56 @@ export const updateDataFromSushiscan = async (name: string) => {
     .trim();
 
   const lastChapterToArray = lastChapter.split(" ");
-  const lastChapterNumber = lastChapterToArray[lastChapterToArray.length - 1];
+  const lastChapterNumber = Number(
+    lastChapterToArray[lastChapterToArray.length - 1]
+  );
 
-  data["totalChapters"] = Number(lastChapterNumber);
-  data["latestChapterNumber"] = Number(lastChapterNumber);
-  data["latestChapterDate"] = $(
-    "#chapterlist > ul > li:nth-child(1) > div > div > a > span.chapterdate"
-  ) as unknown as Date;
+  if (lastChapterNumber > oldLastChapter) {
+    data["totalChapters"] = Number(lastChapterNumber);
+    data["latestChapterNumber"] = Number(lastChapterNumber);
+    data["latestChapterDate"] = $(
+      "#chapterlist > ul > li:nth-child(1) > div > div > a > span.chapterdate"
+    )
+      .text()
+      .trim() as unknown as Date;
+
+    const chapters: Partial<IChapter>[] = [];
+    let foundOldChapter = false;
+
+    // 🔄 Parcourir du plus récent au plus ancien
+    $("ul li[data-num]").each((index, element) => {
+      // 🛑 Arrêter si on a déjà trouvé l'ancien dernier chapitre
+      if (foundOldChapter) return false;
+
+      const $li = $(element);
+      const chapterNumber = parseInt($li.attr("data-num") || "0", 10);
+
+      // 🎯 Vérifier si on a atteint l'ancien dernier chapitre
+      if (chapterNumber <= oldLastChapter) {
+        foundOldChapter = true;
+        return false; // Arrêter la boucle
+      }
+
+      const chapterText = $li.find(".chapternum").text().trim();
+      const releaseDate = $li.find(".chapterdate").text().trim();
+
+      if (chapterNumber > 0 && releaseDate) {
+        chapters.push({
+          chapterNumber,
+          releaseDate: new Date(releaseDate),
+          isVolume: chapterText.includes("Volume"),
+        } as Partial<IChapter>);
+      }
+    });
+
+    data["chapters"] = chapters;
+
+    console.log(
+      `📚 ${chapters.length} nouveaux chapitres ajoutés (${
+        oldLastChapter + 1
+      } → ${lastChapterNumber})`
+    );
+  }
 
   // GET OTHERS INFOS
   const infos = $(

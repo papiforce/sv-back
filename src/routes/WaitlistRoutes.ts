@@ -1,5 +1,10 @@
 import { Router } from "express";
+
 import WaitlistController from "@/controllers/WaitlistController";
+
+import { authMiddleware, requireRoles } from "@/middlewares/AuthMiddleware";
+
+import { UserRole } from "@/models/UserModel";
 
 const router = Router();
 
@@ -17,14 +22,24 @@ router.post("/", WaitlistController.add);
  * @access  Private/Admin
  * @query   ?page=1&limit=50
  */
-router.get("/", WaitlistController.getAll);
+router.get(
+  "/",
+  authMiddleware,
+  requireRoles(UserRole.FOUNDER, UserRole.ADMIN),
+  WaitlistController.getAll
+);
 
 /**
  * @route   GET /api/v1/waitlist/stats
  * @desc    Récupère les statistiques de la waitlist
  * @access  Private/Admin
  */
-router.get("/stats", WaitlistController.getStats);
+router.get(
+  "/stats",
+  authMiddleware,
+  requireRoles(UserRole.FOUNDER, UserRole.ADMIN),
+  WaitlistController.getStats
+);
 
 /**
  * @route   GET /api/v1/waitlist/check/:email
@@ -40,6 +55,11 @@ router.get("/check/:email", WaitlistController.checkEmail);
  * @access  Private/Admin
  * @params  email
  */
-router.delete("/:email", WaitlistController.remove);
+router.delete(
+  "/:email",
+  authMiddleware,
+  requireRoles(UserRole.FOUNDER, UserRole.ADMIN),
+  WaitlistController.remove
+);
 
 export default router;

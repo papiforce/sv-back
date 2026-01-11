@@ -1,5 +1,7 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
+
 import { ICatalog } from "./CatalogModel";
+import { IUser } from "./UserModel";
 
 // ✅ Interface TypeScript
 export interface IChapter extends Document {
@@ -8,6 +10,7 @@ export interface IChapter extends Document {
   title?: string; // Titre du chapitre (optionnel)
   releaseDate: Date; // Date de sortie officielle
   isVolume: boolean;
+  addedBy?: mongoose.Types.ObjectId | IUser; // Référence de l'utilisateur
 
   // ✅ Analytics
   readCount: number; // Nombre de lectures
@@ -45,6 +48,11 @@ const ChapterSchema = new Schema<IChapter>(
       type: Boolean,
       required: [true, "Précisez si c'est un chapitre ou un volume"],
       default: false,
+    },
+    addedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: false,
     },
     readCount: {
       type: Number,

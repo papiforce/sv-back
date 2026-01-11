@@ -5,7 +5,7 @@ import slugify from "@/utils/slugify";
 // ✅ Types d'œuvres
 export enum WorkType {
   MANGA = "MANGA",
-  MANHWA = "MANWHA",
+  MANHWA = "MANHWA",
   MANHUA = "MANHUA",
 }
 

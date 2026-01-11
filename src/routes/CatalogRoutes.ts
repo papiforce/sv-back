@@ -4,9 +4,10 @@ import { CatalogController } from "@/controllers/CatalogController";
 
 import { authMiddleware, requireRoles } from "@/middlewares/AuthMiddleware";
 
+import { UserRole } from "@/models/UserModel";
+
 const router = Router();
 
-// ➕ Ajouter un manga (protégé - nécessite authentification)
 /**
  * @route   GET /api/v1/auth/login
  * @desc    Ajouter un manga
@@ -15,7 +16,7 @@ const router = Router();
 router.post(
   "/add",
   authMiddleware,
-  requireRoles("FOUNDER", "ADMIN"),
+  requireRoles(UserRole.FOUNDER, UserRole.ADMIN),
   CatalogController.addManga
 );
 
@@ -32,5 +33,17 @@ router.get("/", CatalogController.getAllCatalog);
  * @access  Public
  */
 router.get("/:slug", CatalogController.getMangaBySlug);
+
+/**
+ * @route   PUT /api/v1/catalog
+ * @desc    Met à jour le catalogue
+ * @access  Private
+ */
+router.put(
+  "/",
+  // authMiddleware,
+  // requireRoles(UserRole.FOUNDER, UserRole.ADMIN),
+  CatalogController.updateCatalog
+);
 
 export default router;

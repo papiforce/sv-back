@@ -2,9 +2,6 @@ import { Request, Response } from "express";
 import { CatalogService } from "@/services/CatalogService";
 import { EditorialLine } from "@/models/CatalogModel";
 
-/**
- * 🎮 Controller pour la gestion du catalogue
- */
 export class CatalogController {
   /**
    * POST /api/v1/catalog/add
@@ -12,7 +9,7 @@ export class CatalogController {
    */
   static async addManga(req: Request, res: Response): Promise<void> {
     try {
-      const { editorialLine, title } = req.body;
+      const { editorialLine, title, slug } = req.body;
 
       // Validation
       if (!editorialLine || !title) {
@@ -37,6 +34,7 @@ export class CatalogController {
       const manga = await CatalogService.addMangaFromSushiscan({
         editorialLine,
         title,
+        slug,
       });
 
       res.status(201).json({
@@ -75,7 +73,7 @@ export class CatalogController {
   }
 
   /**
-   * 📋 GET /api/v1/catalog
+   * GET /api/v1/catalog
    * Récupère tous les mangas du catalogue (avec pagination)
    */
   static async getAllCatalog(req: Request, res: Response): Promise<void> {
@@ -113,12 +111,16 @@ export class CatalogController {
   }
 
   /**
-   * 🔍 GET /api/v1/catalog/:slug
+   * GET /api/v1/catalog/:slug
    * Récupère un manga par son slug
    */
   static async getMangaBySlug(req: Request, res: Response): Promise<void> {
     try {
       const { slug } = req.params;
+      const { pageQuery, limitQuery } = req.query;
+
+      const page = parseInt(pageQuery as string) || 1;
+      const limit = parseInt(limitQuery as string) || 20;
 
       if (!slug) {
         res.status(400).json({
@@ -128,11 +130,15 @@ export class CatalogController {
         return;
       }
 
-      const manga = await CatalogService.getMangaBySlug(slug);
+      const { manga, chapters } = await CatalogService.getMangaBySlug({
+        slug,
+        page,
+        limit,
+      });
 
       res.status(200).json({
         success: true,
-        data: manga,
+        data: { manga, chapters },
       });
     } catch (error) {
       const err = error as Error & { code?: string };
@@ -145,25 +151,29 @@ export class CatalogController {
       });
     }
   }
-  //   req: Request,
-  //   res: Response,
-  //   next: NextFunction
-  // ): Promise<void> => {
-  //   try {
-  //     const { workType, mangaName } = req.query;
 
-  //     if (!workType || !mangaName) {
-  //       throw new Error("workType and mangaName are required");
-  //     }
+  /**
+   * PUT /api/v1/catalog
+   * Mets à jour le catalogue
+   */
+  static async updateCatalog(req: Request, res: Response): Promise<void> {
+    try {
+      const stats = await CatalogService.updateCatalog();
 
-  //     const html = await this.catalogService.getJapScanPageHtml(
-  //       workType as WorkType,
-  //       mangaName as string
-  //     );
+      res.status(200).json({
+        success: true,
+        message: "Catalogue mis à jour avec succès",
+        stats,
+      });
+    } catch (error) {
+      const err = error as Error & { code?: string };
 
-  //     res.status(200).send(html);
-  //   } catch (error) {
-  //     next(error);
-  //   }
-  // };
+      console.error("Erreur lors de la mise à jour du catalogue :", err);
+      res.status(500).json({
+        success: false,
+        message: "Erreur lors de la mise à jour du catalogue",
+        errors: { global: err.message },
+      });
+    }
+  }
 }
